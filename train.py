@@ -127,7 +127,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             else:
                 sampled_frame_no = None
         ###
-        
+
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
@@ -186,7 +186,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             neighbor_indices = torch.tensor(neighbor_indices).cuda().long().contiguous()
             neighbor_weight = torch.tensor(neighbor_weight).cuda().float().contiguous()
             prev_num_pts = gaussians._xyz.shape[0]
-        
+
         emb = gaussians._embedding[:,None,:].repeat(1,20,1)
         emb_knn = gaussians._embedding[neighbor_indices]
         loss += opt.reg_coef * weighted_l2_loss_v2(emb, emb_knn, neighbor_weight)
@@ -199,7 +199,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             second_difference = first_difference[1:,:] - first_difference[N-2,:]
             loss += opt.coef_tv_temporal_embedding * torch.square(second_difference).mean()
 
-        
+
         loss.backward()
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):

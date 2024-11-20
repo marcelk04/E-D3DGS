@@ -1,2 +1,7 @@
 __pycache__/
 output
+
+submodules/simple-knn/build/
+
+*.so
+*.o
