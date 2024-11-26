@@ -8,8 +8,8 @@ SCENE="cut_roasted_beef"
 
 CONFIG="cut_roasted_beef"
 
-python train.py -s $GT_PATH/$SCENE --model_path $SAVE_PATH/$DATASET/$CONFIG --expname $DATASET/$SCENE --configs arguments/$DATASET/$CONFIG.py -r 1
+python train.py -s $GT_PATH/$SCENE --model_path $SAVE_PATH/$DATASET/$SCENE --expname $DATASET/$SCENE --configs arguments/$DATASET/$CONFIG.py -r 1
 
 python render.py --model_path $SAVE_PATH/$DATASET/$CONFIG --skip_train --configs arguments/$DATASET/$CONFIG.py
 
-python metrics.py --model_path $SAVE_PATH/$DATASET/$CONFIG
+#python metrics.py --model_path $SAVE_PATH/$DATASET/$CONFIG

@@ -23,7 +23,7 @@
 import os 
 import cv2 
 import glob 
-import tqdm 
+from tqdm import tqdm
 import numpy as np 
 import shutil
 import pickle
@@ -37,51 +37,74 @@ from script.thirdparty.helper3dg import getcolmapsinglen3d
 
 
 
-def extractframes(videopath):
+def extractframes(videopath: str) -> bool:
     cam = cv2.VideoCapture(videopath)
+    success = True
     ctr = 0
-    sucess = True
+
+    # TODO: doubt this does anything, path does not seem to be correct
     for i in range(300):
         if os.path.exists(os.path.join(videopath.replace(".mp4", ""), str(i) + ".png")):
             ctr += 1
+
+    # TODO: also, wth is this condition, this is just waiting to cause an error
     if ctr == 300 or ctr == 150: # 150 for 04_truck 
         print("already extracted all the frames, skip extracting")
         return
+    
+    base_dir = os.path.dirname(videopath) # directory in which the videos are located
+    cam_dir = os.path.basename(videopath)[:-4] # filename without file extension, e.g. .mp4
+    save_dir = os.path.join(base_dir, "images", cam_dir)
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
     ctr = 0
     while ctr < 300:
         try:
             _, frame = cam.read()
-            savepath = os.path.join(os.path.dirname(videopath), "images", os.path.basename(videopath)[:-4], str(ctr).zfill(4) + ".png")
-            if not os.path.exists(os.path.dirname(savepath)):
-                os.makedirs(os.path.dirname(savepath))
+
+            filename = str(ctr).zfill(4) + ".png"
+            savepath = os.path.join(save_dir, filename)
 
             cv2.imwrite(savepath, frame)
+
             ctr += 1 
+        except KeyboardInterrupt:
+            success = False
+            print(f"extracted {ctr} frames from {videopath}")
+            break
         except:
-            sucess = False
-            print("error")
+            success = False
+            print(f"error while extracting frame {ctr} from '{videopath}'")
+
     cam.release()
-    return
+
+    return success
 
 
-def preparecolmapdynerf(folder):
+def preparecolmapdynerf(folder: str) -> None:
+    """
+    Copies the first image of each camera into .../colmap/input/
+    """
+
     folderlist = glob.glob(folder + "images/cam**/")
-    savedir = os.path.join(folder, "colmap")
-    if not os.path.exists(savedir):
-        os.mkdir(savedir)
-    savedir = os.path.join(savedir, "input")
-    if not os.path.exists(savedir):
-        os.mkdir(savedir)
 
-    for folder in folderlist :
-        imagepath = os.path.join(folder, "0000.png")
-        imagesavepath = os.path.join(savedir, folder.split("/")[-2] + ".png")
+    savedir = os.path.join(folder, "colmap", "input")
+    if not os.path.exists(savedir):
+        os.makedirs(savedir)
+
+    for camfolder in folderlist:
+        imagepath = os.path.join(camfolder, "0000.png")
+        imagesavepath = os.path.join(savedir, camfolder.split("/")[-2] + ".png") # e.g. .../colmap/input/cam00.png
 
         shutil.copy(imagepath, imagesavepath)
 
 
     
-def convertdynerftocolmapdb(path):
+def convertdynerftocolmapdb(path: str) -> None:
+    # see https://github.com/bmild/nerf#generating-poses-for-your-own-scenes for poses
+    # also https://github.com/fyusion/llff?tab=readme-ov-file#using-your-own-poses-without-running-colmap
     originnumpy = os.path.join(path, "poses_bounds.npy")
     video_paths = sorted(glob.glob(os.path.join(path, 'cam*.mp4')))
     projectfolder = os.path.join(path, "colmap")
@@ -96,21 +119,28 @@ def convertdynerftocolmapdb(path):
     savetxt = os.path.join(manualfolder, "images.txt")
     savecamera = os.path.join(manualfolder, "cameras.txt")
     savepoints = os.path.join(manualfolder, "points3D.txt")
+
     imagetxtlist = []
     cameratxtlist = []
-    if os.path.exists(os.path.join(projectfolder, "input.db")):
-        os.remove(os.path.join(projectfolder, "input.db"))
 
-    db = COLMAPDatabase.connect(os.path.join(projectfolder, "input.db"))
+
+    dbpath = os.path.join(projectfolder, "input.db")
+
+    if os.path.exists(dbpath):
+        os.remove(dbpath)
+
+    db = COLMAPDatabase.connect(dbpath)
 
     db.create_tables()
 
 
     with open(originnumpy, 'rb') as numpy_file:
-        poses_bounds = np.load(numpy_file)
-        poses = poses_bounds[:, :15].reshape(-1, 3, 5)
+        poses_bounds = np.load(numpy_file) # shape: (20, 17)
+        poses = poses_bounds[:, :15].reshape(-1, 3, 5) # shape (20, 3, 5)
 
-        llffposes = poses.copy().transpose(1,2,0)
+        llffposes = poses.copy().transpose(1,2,0) # shape: (3, 5, 20)
+
+        # TODO: wieso wieder world-to-camera, posen sind in camera-to-world gegeben
         w2c_matriclist = posetow2c_matrcs(llffposes)
         assert (type(w2c_matriclist) == list)
 
@@ -174,20 +204,24 @@ if __name__ == "__main__" :
     parser.add_argument("--endframe", default=300, type=int)
 
     args = parser.parse_args()
+
     videopath = args.videopath
 
+    # TODO: both unused? ...why
     startframe = args.startframe
     endframe = args.endframe
 
 
     if startframe >= endframe:
-        print("start frame must smaller than end frame")
+        print("start frame must be smaller than end frame")
         quit()
+
     if startframe < 0 or endframe > 300:
-        print("frame must in range 0-300")
+        print("start/end frame must be in range 0-300")
         quit()
+
     if not os.path.exists(videopath):
-        print("path not exist")
+        print("path does not exist")
         quit()
     
     if not videopath.endswith("/"):
@@ -195,25 +229,32 @@ if __name__ == "__main__" :
     
     
     
-    #### step1
-    if not os.path.exists(os.path.join(videopath, "images")):
-        os.makedirs(os.path.join(videopath, "images"))
+    #### step 1: extract frames from videos
+    images_path = os.path.join(videopath, "images")
+
+    if not os.path.exists(images_path):
         print("start extracting 300 frames from videos")
+
+        os.makedirs(images_path)
         videoslist = sorted(glob.glob(videopath + "*.mp4"))
-        for v in tqdm.tqdm(videoslist):
+
+        for v in tqdm(videoslist):
             extractframes(v)
+    else:
+        print(f"{images_path} already exists, skipping frame extraction")
     
-    # # ## step2 prepare colmap input 
+    #### step 2: prepare colmap input 
     print("start preparing colmap image input")
     preparecolmapdynerf(videopath)
 
 
+    #### step 3: prepare colmap db file 
     print("start preparing colmap database input")
-    # # ## step 3 prepare colmap db file 
     convertdynerftocolmapdb(videopath)
 
 
-    # ## step 4 run colmap, per frame, if error, reinstall opencv-headless 
+    #### step 4: run colmap, per frame, if error, reinstall opencv-headless 
+    print("start executing colmap")
     getcolmapsinglen3d(videopath)
 
 

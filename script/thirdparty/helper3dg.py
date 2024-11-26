@@ -128,17 +128,17 @@ def gettestparse():
     return args, model.extract(args), pipeline.extract(args), multiview
     
 def getcolmapsinglen3d(folder):
-    folder = os.path.join(folder, "colmap")
-    assert os.path.exists(folder)
+    colmapfolder = os.path.join(folder, "colmap")
+    assert os.path.exists(colmapfolder)
 
-    dbfile = os.path.join(folder, "input.db")
-    inputimagefolder = os.path.join(folder, "input")
-    distortedmodel = os.path.join(folder, "distorted/sparse")
-    step2model = os.path.join(folder, "tmp")
+    dbfile = os.path.join(colmapfolder, "input.db")
+    inputimagefolder = os.path.join(colmapfolder, "input")
+    distortedmodel = os.path.join(colmapfolder, "distorted/sparse")
+    step2model = os.path.join(colmapfolder, "tmp")
     if not os.path.exists(step2model):
         os.makedirs(step2model)
 
-    manualinputfolder = os.path.join(folder, "manual")
+    manualinputfolder = os.path.join(colmapfolder, "manual")
     if not os.path.exists(distortedmodel):
         os.makedirs(distortedmodel)
 
@@ -164,7 +164,7 @@ def getcolmapsinglen3d(folder):
     print(triandmap)
 
 
-    workspace_path = os.path.join(folder, "dense/workspace")
+    workspace_path = os.path.join(colmapfolder, "dense/workspace")
     os.makedirs(workspace_path, exist_ok=True)
 
     img_undist_cmd = "colmap" + " image_undistorter --image_path " + inputimagefolder + " --input_path " + distortedmodel + " --output_path " + workspace_path  \

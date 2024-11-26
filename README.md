@@ -23,7 +23,7 @@ git clone https://github.com/JeongminB/E-D3DGS.git
 cd E-D3DGS
 git submodule update --init --recursive
 
-conda create -n ed3dgs python=3.7 
+conda create -n ed3dgs python=3.9 
 conda activate ed3dgs
 
 # If submodules fail to be downloaded, refer to the repository of 3DGS  
