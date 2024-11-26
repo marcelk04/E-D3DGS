@@ -36,14 +36,9 @@ def extract_images(path: str) -> list[str]:
 	Finds all images matching the name C****.* in the directory given by path
 	and copies them into the directory colmap/input/.
 	This will not copy any images if the directory colmap/input/ already exists.
-
-	\param path the path to the directory containing the images.
-
-	/return a list of all the names of the files that were copied.
 	"""
 
-	# TODO: replace file type with wildcard
-	images = sorted(glob.glob(os.path.join(path, "[C][0-9][0-9][0-9][0-9].jpg")))
+	images = sorted(glob.glob(os.path.join(path, "[C][0-9][0-9][0-9][0-9].*")))
 	filenames = [os.path.basename(img) for img in images]
 
 	images_path = os.path.join(path, "colmap", "input")
@@ -91,7 +86,7 @@ def extract_poses(path: str, data_type_suffix: str) -> None:
 	print(f"Start writing to new database at '{db_path}'")
 
 	for i, camera in enumerate(calibration["cameras"]):
-		focal_length = 6393.60
+		# Extract information about the poses from the JSON file
 
 		# TODO: why is resolution only 0.5 of the actual resolution?
 		width = camera["intrinsics"]["resolution"][0] * 2
@@ -106,24 +101,41 @@ def extract_poses(path: str, data_type_suffix: str) -> None:
 		R = view_matrix[:3, :3] # rotation matrix
 		Q = rotmat2qvec(R) # rotation quaternion (hopefully)
 
+		camera_matrix = np.array(camera["intrinsics"]["camera_matrix"]).reshape((3, 3))
+
+		focal_length_x = camera_matrix[0, 0]
+		focal_length_y = camera_matrix[1, 1]
+
+		# TODO: again only 0.5x?
+		principal_point_x = camera_matrix[0, 2] * 2
+		principal_point_y = camera_matrix[1, 2] * 2
+
+		distortion_coefficients = np.array(camera["intrinsics"]["distortion_coefficients"])
+
 		# Write camera and image data into database
-		params = np.array([focal_length, focal_length, width//2, height//2])
-		camera_id = db.add_camera(1, width, height, params)
+		params = np.array([focal_length_x, focal_length_y, principal_point_x, principal_point_y, distortion_coefficients[0], distortion_coefficients[1], distortion_coefficients[2], distortion_coefficients[3]])
+
+		# Camera Models:
+		# PINHOLE = 1
+		# RADIAL = 3
+		# OPENCV = 4
+		camera_id = db.add_camera(4, width, height, params)
 
 		image_id = db.add_image(image_name, camera_id, Q, T, image_id=i+1)
 
 		db.commit()
 
-		# Write to cameras.txt and images.txt
+		# Append lines for images.txt and cameras.txt
 		Q_string = " ".join([str(q) for q in Q])
 		T_string = " ".join([str(t) for t in T])
+		params_string = " ".join([str(num) for num in params])
 
 		image_line = f"{image_id} {Q_string} {T_string} {camera_id} {image_name}\n"
 
 		imagetxt_list.append(image_line)
 		imagetxt_list.append("\n")
 
-		camera_line = f"{camera_id} PINHOLE {str(width)} {str(height)} {str(focal_length)} {str(focal_length)} {str(width//2)} {str(height//2)}\n"
+		camera_line = f"{camera_id} OPENCV {width} {height} {params_string}\n"
 		cameratxt_list.append(camera_line)
 
 	db.close()
@@ -131,6 +143,7 @@ def extract_poses(path: str, data_type_suffix: str) -> None:
 
 	print("Done writing to database")
 	
+	# Write prepared data into images.txt and cameras.txt
 	with open(imagestxt_path, "w") as f:
 		for line in imagetxt_list:
 			f.write(line)
@@ -142,7 +155,19 @@ def extract_poses(path: str, data_type_suffix: str) -> None:
 	with open(points3Dtxt_path, "w") as f:
 		pass
 
-def run_colmap(path: str) -> None:
+def remove_undistorted_images(colmap_dense_path: str, filenames: list[str]) -> int:
+	count = 0
+
+	for file in filenames:
+		filepath = os.path.join(colmap_dense_path, "images", file)
+
+		if os.path.exists(filepath):
+			os.remove(filepath)
+			count += 1
+
+	return count
+
+def run_colmap(path: str, image_names: list[str]) -> None:
 	colmap_path = os.path.join(path, "colmap")
 
 	db_path = os.path.join(colmap_path, "input.db")
@@ -156,6 +181,10 @@ def run_colmap(path: str) -> None:
 	create_dir(dense_path)
 
 	output_path = os.path.join(dense_path, "fused.ply")
+
+	# Clear colmap/dense/images
+	removed_images = remove_undistorted_images(dense_path, image_names)
+	print(f"Removed {removed_images} images from '{dense_path}'")
 	
 	# Colmap commands
 	print("Starting COLMAP...")
@@ -167,10 +196,10 @@ def run_colmap(path: str) -> None:
 	feature_matcher = f"colmap exhaustive_matcher --database_path {db_path}"
 	exec_cmd(feature_matcher)
 
-	tri_and_map = f"colmap point_triangulator --database_path {db_path} --image_path {image_path} --input_path {manual_path} --output_path {sparse_path} --Mapper.ba_global_function_tolerance=0.000001"
+	tri_and_map = f"colmap point_triangulator --database_path {db_path} --image_path {image_path} --input_path {manual_path} --output_path {sparse_path}"
 	exec_cmd(tri_and_map)
 
-	image_undistortion = f"colmap image_undistorter --image_path {image_path} --input_path {sparse_path} --output_path {dense_path} --output_type COLMAP"
+	image_undistortion = f"colmap image_undistorter --image_path {image_path} --input_path {sparse_path} --output_path {dense_path}"
 	exec_cmd(image_undistortion)
 
 	patch_match_stereo = f"colmap patch_match_stereo --workspace_path {dense_path}"
@@ -195,7 +224,7 @@ def main():
 
 	extract_poses(image_path, images[0][-4:])
 
-	run_colmap(image_path)
+	run_colmap(image_path, images)
 
 if __name__ == "__main__":
 	main()
