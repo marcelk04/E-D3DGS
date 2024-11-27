@@ -20,12 +20,12 @@ def load_paths(args: argparse.Namespace) -> dict[str, str]:
 	paths['base'] = args.source_path
 	paths['calibration'] = os.path.join(paths['base'], args.calibration_file)
 
-	paths['colmap'] = os.path.join(paths['base'], 'colmap')
+	paths['colmap'] = os.path.join(paths['base'], "colmap")
 
-	paths['masks'] = os.path.join(paths['colmap'], 'masks')
-	paths['input'] = os.path.join(paths['colmap'], 'input')
-	paths['distorted'] = os.path.join(paths['colmap'], 'distorted')
-	paths['manual'] = os.path.join(paths['colmap'], 'manual')
+	paths['masks'] = os.path.join(paths['colmap'], "masks")
+	paths['input'] = os.path.join(paths['colmap'], "input")
+	paths['distorted'] = os.path.join(paths['colmap'], "distorted")
+	paths['manual'] = os.path.join(paths['colmap'], "manual")
 
 	paths['imagestxt'] = os.path.join(paths['manual'], "images.txt")
 	paths['camerastxt'] = os.path.join(paths['manual'], "cameras.txt")
@@ -34,16 +34,16 @@ def load_paths(args: argparse.Namespace) -> dict[str, str]:
 	if args.gaussian_splatting:
 		paths['db'] = os.path.join(paths['distorted'], "database.db")
 
-		paths['sparse'] = os.path.join(paths['distorted'], 'sparse', "0")
+		paths['sparse'] = os.path.join(paths['distorted'], "sparse", "0")
 
 		paths['dense'] = paths['colmap']
 		paths['output'] = "" # Not used
 	else:
 		paths['db'] = os.path.join(paths['colmap'], "database.db")
 		
-		paths['sparse'] = os.path.join(paths['distorted'], 'sparse')
+		paths['sparse'] = os.path.join(paths['distorted'], "sparse")
 
-		paths['dense'] = os.path.join(paths['colmap'], 'dense', "workspace")
+		paths['dense'] = os.path.join(paths['colmap'], "dense", "workspace")
 		paths['output'] = os.path.join(paths['dense'], "fused.ply")
 
 		
@@ -109,9 +109,17 @@ def extract_masks(paths: dict[str, str], filenames: list[str]) -> None:
 
 	print(f"Copied {len(masks)} masks into '{paths['masks']}'")
 
-def extract_poses(paths: dict[str, str], data_type_suffix: str) -> None:
-	assert os.path.exists(paths['calibration'])
+def extract_poses(paths: dict[str, str], args: argparse.Namespace, data_type_suffix: str) -> None:
+	# Set camera model
+	camera_models = {"PINHOLE": 1 , "OPENCV": 4 }
+	if not args.camera in camera_models.keys():
+		print(f"Unsupported camera model: {args.camera}")
+		exit()
 
+	camera_model = camera_models[args.camera]
+
+	# Load calibration file
+	assert os.path.exists(paths['calibration'])
 	calibration_file = open(paths['calibration'])
 	calibration = json.load(calibration_file)
 
@@ -121,6 +129,7 @@ def extract_poses(paths: dict[str, str], data_type_suffix: str) -> None:
 	imagetxt_list = []
 	cameratxt_list = []
 
+	# Delete old database
 	if os.path.exists(paths['db']):
 		print(f"Overwriting old input database at '{paths['db']}'")
 		os.remove(paths['db'])
@@ -158,13 +167,12 @@ def extract_poses(paths: dict[str, str], data_type_suffix: str) -> None:
 		distortion_coefficients = np.array(camera["intrinsics"]["distortion_coefficients"])
 
 		# Write camera and image data into database
-		params = np.array([focal_length_x, focal_length_y, principal_point_x, principal_point_y, distortion_coefficients[0], distortion_coefficients[1], distortion_coefficients[2], distortion_coefficients[3]])
+		if camera_model == 1: # PINHOLE
+			params = np.array([focal_length_x, focal_length_y, principal_point_x, principal_point_y])
+		else: # OPENCV
+			params = np.array([focal_length_x, focal_length_y, principal_point_x, principal_point_y, distortion_coefficients[0], distortion_coefficients[1], distortion_coefficients[2], distortion_coefficients[3]])
 
-		# Camera Models:
-		# PINHOLE = 1
-		# RADIAL = 3
-		# OPENCV = 4
-		camera_id = db.add_camera(4, width, height, params)
+		camera_id = db.add_camera(camera_model, width, height, params)
 
 		image_id = db.add_image(image_name, camera_id, Q, T, image_id=i+1)
 		#image_id = db.add_image(image_name, camera_id, image_id=i+1)
@@ -184,7 +192,7 @@ def extract_poses(paths: dict[str, str], data_type_suffix: str) -> None:
 		imagetxt_list.append(image_line)
 		imagetxt_list.append("\n")
 
-		camera_line = f"{camera_id} OPENCV {width} {height} {params_string}\n"
+		camera_line = f"{camera_id} {args.camera} {width} {height} {params_string}\n"
 		cameratxt_list.append(camera_line)
 
 	db.close()
@@ -204,11 +212,11 @@ def extract_poses(paths: dict[str, str], data_type_suffix: str) -> None:
 	with open(paths['points3Dtxt'], "w") as f:
 		pass
 
-def remove_undistorted_images(colmap_dense_path: str, filenames: list[str]) -> int:
+def remove_undistorted_images(paths: dict[str, str], filenames: list[str]) -> int:
 	count = 0
 
 	for file in filenames:
-		filepath = os.path.join(colmap_dense_path, "images", file)
+		filepath = os.path.join(paths["undistorted_images"], file)
 
 		if os.path.exists(filepath):
 			os.remove(filepath)
@@ -221,38 +229,52 @@ def run_colmap(paths: dict[str, str], args: argparse.Namespace, image_names: lis
 	create_dir(paths['dense'])
 
 	# Clear colmap/dense/images
-	removed_images = remove_undistorted_images(paths['undistorted_images'], image_names)
+	removed_images = remove_undistorted_images(paths, image_names)
 	print(f"Removed {removed_images} images from '{paths['undistorted_images']}'")
 	
 	# Colmap commands
 	print("Starting COLMAP...")
 	print()
 
-	feature_extract = f"colmap feature_extractor --database_path {paths['db']} --image_path {paths['input']}"
+	feature_extract = f"colmap feature_extractor \
+		--database_path {paths['db']} \
+		--image_path {paths['input']}"
 	if args.use_masks:
 		feature_extract += f" --ImageReader.mask_path {paths['masks']}"
 	exec_cmd(feature_extract)
 
-	feature_matcher = f"colmap exhaustive_matcher --database_path {paths['db']}" # --TwoViewGeometry.min_num_inliers 5
+	feature_matcher = f"colmap exhaustive_matcher \
+		--database_path {paths['db']}" # --TwoViewGeometry.min_num_inliers 5
 	exec_cmd(feature_matcher)
 
-	tri_and_map = f"colmap point_triangulator --database_path {paths['db']} --image_path {paths['input']} --input_path {paths['manual']} --output_path {paths['sparse']} --Mapper.ba_global_function_tolerance=0.000001" # --Mapper.min_num_matches 5 --Mapper.init_min_num_inliers 40 --Mapper.ba_global_function_tolerance=0.000001
+	tri_and_map = f"colmap point_triangulator \
+		--database_path {paths['db']} \
+		--image_path {paths['input']} \
+		--input_path {paths['manual']} \
+		--output_path {paths['sparse']} \
+		--Mapper.ba_global_function_tolerance=0.000001" # --Mapper.min_num_matches 5 --Mapper.init_min_num_inliers 40 --Mapper.ba_global_function_tolerance=0.000001
 	exec_cmd(tri_and_map)
 
-	image_undistortion = f"colmap image_undistorter --image_path {paths['input']} --input_path {paths['sparse']} --output_path {paths['dense']}"
+	image_undistortion = f"colmap image_undistorter \
+		--image_path {paths['input']} \
+		--input_path {paths['sparse']} \
+		--output_path {paths['dense']}"
 	exec_cmd(image_undistortion)
 
 	if not args.gaussian_splatting:
-		patch_match_stereo = f"colmap patch_match_stereo --workspace_path {paths['dense']}"
+		patch_match_stereo = f"colmap patch_match_stereo \
+			--workspace_path {paths['dense']}"
 		exec_cmd(patch_match_stereo)
 
-		stereo_fusion = f"colmap stereo_fusion --workspace_path {paths['dense']} --output_path {paths['output']}" # --StereoFusion.mask_path {mask_path}
+		stereo_fusion = f"colmap stereo_fusion \
+			--workspace_path {paths['dense']} \
+			--output_path {paths['output']}" # --StereoFusion.mask_path {mask_path}
 		exec_cmd(stereo_fusion)
 
 		print(f"All done! The output is in '{paths['output']}'")
 	else:
-		sparse = os.path.join(paths['dense'], 'sparse')
-		sparse0 = os.path.join(paths['dense'], 'sparse', "0")
+		sparse = os.path.join(paths['dense'], "sparse")
+		sparse0 = os.path.join(paths['dense'], "sparse", "0")
 
 		files = os.listdir(sparse)
 		create_dir(sparse0)
@@ -267,19 +289,21 @@ def run_colmap(paths: dict[str, str], args: argparse.Namespace, image_names: lis
 
 
 def main():
-	parser = argparse.ArgumentParser()
-	parser.add_argument("--source_path", "-s", default="", type=str)
-	parser.add_argument("--calibration_file", "-c", default="calibration.json", type=str)
-	parser.add_argument("--gaussian_splatting", action="store_true")
-	parser.add_argument("--use_masks", action="store_true")
+	parser = argparse.ArgumentParser(prog="python pre_vci.py", description="Generates a sparse/dense point cloud from a set of input images and camera poses generated by the VCI")
+	parser.add_argument("--source_path", "-s", default="", type=str, help="the path where the image files are located")
+	parser.add_argument("--calibration_file", "-c", default="calibration.json", type=str, help="the name of the camera calibration file (default: %(default)s)")
+	parser.add_argument("--gaussian_splatting", action="store_true", help="enables output for 3d gaussian splatting")
+	parser.add_argument("--use_masks", action="store_true", help="enables usage of masks in the feature extractor")
+	parser.add_argument("--camera", default="OPENCV", type=str, choices=["OPENCV", "PINHOLE"], help="the camera model used when extracting the poses (default: %(default)s)")
 	args = parser.parse_args()
 
 	paths = load_paths(args)
+	assert os.path.exists(paths['base'])
 
+	print("Set directories:")
 	for k, v in paths.items():
 		print(f"{k:<20} -> {v}")
-
-	assert os.path.exists(paths['base'])
+	print()
 
 	print(f"Preparing data from '{paths['base']}'")
 
@@ -288,7 +312,7 @@ def main():
 	if args.use_masks:
 		extract_masks(paths, images)
 
-	extract_poses(paths, images[0][-4:])
+	extract_poses(paths, args, images[0][-4:])
 
 	run_colmap(paths, args, images)
 
