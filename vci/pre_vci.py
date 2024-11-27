@@ -15,6 +15,43 @@ from script.thirdparty.pre_colmap import *
 #from vci.COLMAPDatabase import *
 from script.thirdparty.my_utils import rotmat2qvec
 
+def load_paths(args: argparse.Namespace) -> dict[str, str]:
+	paths = {}
+	paths['base'] = args.source_path
+	paths['calibration'] = os.path.join(paths['base'], args.calibration_file)
+
+	paths['colmap'] = os.path.join(paths['base'], 'colmap')
+
+	paths['masks'] = os.path.join(paths['colmap'], 'masks')
+	paths['input'] = os.path.join(paths['colmap'], 'input')
+	paths['distorted'] = os.path.join(paths['colmap'], 'distorted')
+	paths['manual'] = os.path.join(paths['colmap'], 'manual')
+
+	paths['imagestxt'] = os.path.join(paths['manual'], "images.txt")
+	paths['camerastxt'] = os.path.join(paths['manual'], "cameras.txt")
+	paths['points3Dtxt'] = os.path.join(paths['manual'], "points3D.txt")
+
+	if args.gaussian_splatting:
+		paths['db'] = os.path.join(paths['distorted'], "database.db")
+
+		paths['sparse'] = os.path.join(paths['distorted'], 'sparse', "0")
+
+		paths['dense'] = paths['colmap']
+		paths['output'] = "" # Not used
+	else:
+		paths['db'] = os.path.join(paths['colmap'], "database.db")
+		
+		paths['sparse'] = os.path.join(paths['distorted'], 'sparse')
+
+		paths['dense'] = os.path.join(paths['colmap'], 'dense', "workspace")
+		paths['output'] = os.path.join(paths['dense'], "fused.ply")
+
+		
+	paths['undistorted_images'] = os.path.join(paths['dense'], "images")
+
+	return paths
+	
+
 def create_dir(path: str) -> bool:
 	if not os.path.exists(path):
 		os.makedirs(path)
@@ -32,29 +69,28 @@ def exec_cmd(cmd: str) -> None:
 
 	print()
 
-def extract_images(path: str) -> list[str]:
+def extract_images(paths: dict[str, str]) -> list[str]:
 	"""
 	Finds all images matching the name C****.* in the directory given by path
 	and copies them into the directory colmap/input/.
 	This will not copy any images if the directory colmap/input/ already exists.
 	"""
 
-	images = sorted(glob.glob(os.path.join(path, "[C][0-9][0-9][0-9][0-9].*")))
+	images = sorted(glob.glob(os.path.join(paths['base'], "[C][0-9][0-9][0-9][0-9].*")))
 	filenames = [os.path.basename(img) for img in images]
 
-	images_path = os.path.join(path, "colmap", "input")
-	if not create_dir(images_path):
-		print(f"'{images_path}' already exists. Skipping image extraction!")
+	if not create_dir(paths['input']):
+		print(f"'{paths['input']}' already exists. Skipping image extraction!")
 		return filenames
 	
 	for img in images:
-		shutil.copy(img, images_path)
+		shutil.copy(img, paths['input'])
 
-	print(f"Copied {len(images)} images into '{images_path}'")
+	print(f"Copied {len(images)} images into '{paths['input']}'")
 
 	return filenames
 
-def extract_masks(path: str, filenames: list[str]) -> None:
+def extract_masks(paths: dict[str, str], filenames: list[str]) -> None:
 	if len(filenames) == 0:
 		print("Found no files. Skipping mask extraction!")
 		return
@@ -62,47 +98,37 @@ def extract_masks(path: str, filenames: list[str]) -> None:
 	file_type = ".png"
 	masks = [file[:-4] + "_mask" for file in filenames]
 
-	masks_path = os.path.join(path, "colmap", "masks")
-	if not create_dir(masks_path):
-		print(f"'{masks_path}' already exists. Skipping mask extraction!")
+	if not create_dir(paths['masks']):
+		print(f"'{paths['masks']}' already exists. Skipping mask extraction!")
 		return
 	
 	for file in filenames:
-		src_path = os.path.join(path, file[:-4] + "_mask.png")
-		dst_path = os.path.join(masks_path, file[:-4] + ".jpg.png")
+		src_path = os.path.join(paths['base'], file[:-4] + "_mask.png")
+		dst_path = os.path.join(paths['masks'], file[:-4] + ".jpg.png")
 		shutil.copy(src_path, dst_path)
 
-	print(f"Copied {len(masks)} masks into '{masks_path}'")
+	print(f"Copied {len(masks)} masks into '{paths['masks']}'")
 
-def extract_poses(path: str, data_type_suffix: str) -> None:
-	calibration_path = os.path.join(path, "calibration.json")
-	assert os.path.exists(calibration_path)
+def extract_poses(paths: dict[str, str], data_type_suffix: str) -> None:
+	assert os.path.exists(paths['calibration'])
 
-	calibration_file = open(calibration_path)
+	calibration_file = open(paths['calibration'])
 	calibration = json.load(calibration_file)
 
-	colmap_path = os.path.join(path, "colmap")
-	images_path = os.path.join(colmap_path, "input")
-	manual_path = os.path.join(colmap_path, "manual")
-
-	create_dir(manual_path)
-
-	imagestxt_path = os.path.join(manual_path, "images.txt")
-	camerastxt_path = os.path.join(manual_path, "cameras.txt")
-	points3Dtxt_path = os.path.join(manual_path, "points3D.txt")
+	create_dir(paths['manual'])
+	create_dir(paths['distorted'])
 
 	imagetxt_list = []
 	cameratxt_list = []
 
-	db_path = os.path.join(colmap_path, "input.db")
-	if os.path.exists(db_path):
-		print(f"Overwriting old input database at '{db_path}'")
-		os.remove(db_path)
+	if os.path.exists(paths['db']):
+		print(f"Overwriting old input database at '{paths['db']}'")
+		os.remove(paths['db'])
 
-	db = COLMAPDatabase.connect(db_path)
+	db = COLMAPDatabase.connect(paths['db'])
 	db.create_tables()
 
-	print(f"Start writing to new database at '{db_path}'")
+	print(f"Start writing to new database at '{paths['db']}'")
 
 	for i, camera in enumerate(calibration["cameras"]):
 		# Extract information about the poses from the JSON file
@@ -167,15 +193,15 @@ def extract_poses(path: str, data_type_suffix: str) -> None:
 	print("Done writing to database")
 	
 	# Write prepared data into images.txt and cameras.txt
-	with open(imagestxt_path, "w") as f:
+	with open(paths['imagestxt'], "w") as f:
 		for line in imagetxt_list:
 			f.write(line)
 
-	with open(camerastxt_path, "w") as f:
+	with open(paths['camerastxt'], "w") as f:
 		for line in cameratxt_list:
 			f.write(line)
 
-	with open(points3Dtxt_path, "w") as f:
+	with open(paths['points3Dtxt'], "w") as f:
 		pass
 
 def remove_undistorted_images(colmap_dense_path: str, filenames: list[str]) -> int:
@@ -190,69 +216,81 @@ def remove_undistorted_images(colmap_dense_path: str, filenames: list[str]) -> i
 
 	return count
 
-def run_colmap(path: str, image_names: list[str]) -> None:
-	colmap_path = os.path.join(path, "colmap")
-
-	db_path = os.path.join(colmap_path, "input.db")
-	image_path = os.path.join(colmap_path, "input")
-	mask_path = os.path.join(colmap_path, "masks")
-	manual_path = os.path.join(colmap_path, "manual")
-
-	sparse_path = os.path.join(colmap_path, "distorted", "sparse")
-	create_dir(sparse_path)
-
-	dense_path = os.path.join(colmap_path, "dense", "workspace")
-	create_dir(dense_path)
-
-	output_path = os.path.join(dense_path, "fused.ply")
+def run_colmap(paths: dict[str, str], args: argparse.Namespace, image_names: list[str]) -> None:
+	create_dir(paths['sparse'])
+	create_dir(paths['dense'])
 
 	# Clear colmap/dense/images
-	removed_images = remove_undistorted_images(dense_path, image_names)
-	print(f"Removed {removed_images} images from '{dense_path}'")
+	removed_images = remove_undistorted_images(paths['undistorted_images'], image_names)
+	print(f"Removed {removed_images} images from '{paths['undistorted_images']}'")
 	
 	# Colmap commands
 	print("Starting COLMAP...")
 	print()
 
-	feature_extract = f"colmap feature_extractor --database_path {db_path} --image_path {image_path} --ImageReader.mask_path {mask_path}" #  --ImageReader.mask_path {mask_path}
+	feature_extract = f"colmap feature_extractor --database_path {paths['db']} --image_path {paths['input']}"
+	if args.use_masks:
+		feature_extract += f" --ImageReader.mask_path {paths['masks']}"
 	exec_cmd(feature_extract)
 
-	feature_matcher = f"colmap exhaustive_matcher --database_path {db_path}"
+	feature_matcher = f"colmap exhaustive_matcher --database_path {paths['db']}" # --TwoViewGeometry.min_num_inliers 5
 	exec_cmd(feature_matcher)
 
-	mapper = f"colmap mapper --database_path {db_path} --image_path {image_path} --input_path {manual_path} --output_path {sparse_path}"
-	#exec_cmd(mapper)
-
-	tri_and_map = f"colmap point_triangulator --database_path {db_path} --image_path {image_path} --input_path {manual_path} --output_path {sparse_path}"
+	tri_and_map = f"colmap point_triangulator --database_path {paths['db']} --image_path {paths['input']} --input_path {paths['manual']} --output_path {paths['sparse']} --Mapper.ba_global_function_tolerance=0.000001" # --Mapper.min_num_matches 5 --Mapper.init_min_num_inliers 40 --Mapper.ba_global_function_tolerance=0.000001
 	exec_cmd(tri_and_map)
 
-	image_undistortion = f"colmap image_undistorter --image_path {image_path} --input_path {sparse_path} --output_path {dense_path}"
+	image_undistortion = f"colmap image_undistorter --image_path {paths['input']} --input_path {paths['sparse']} --output_path {paths['dense']}"
 	exec_cmd(image_undistortion)
 
-	patch_match_stereo = f"colmap patch_match_stereo --workspace_path {dense_path}"
-	exec_cmd(patch_match_stereo)
+	if not args.gaussian_splatting:
+		patch_match_stereo = f"colmap patch_match_stereo --workspace_path {paths['dense']}"
+		exec_cmd(patch_match_stereo)
 
-	stereo_fusion = f"colmap stereo_fusion --workspace_path {dense_path} --output_path {output_path}" #
-	exec_cmd(stereo_fusion)
+		stereo_fusion = f"colmap stereo_fusion --workspace_path {paths['dense']} --output_path {paths['output']}" # --StereoFusion.mask_path {mask_path}
+		exec_cmd(stereo_fusion)
 
-	print(f"All done! The output is in '{output_path}'")
+		print(f"All done! The output is in '{paths['output']}'")
+	else:
+		sparse = os.path.join(paths['dense'], 'sparse')
+		sparse0 = os.path.join(paths['dense'], 'sparse', "0")
+
+		files = os.listdir(sparse)
+		create_dir(sparse0)
+
+		# Copy each file from the source directory to the destination directory
+		for file in files:
+			if file == '0':
+				continue
+			source_file = os.path.join(sparse, file)
+			destination_file = os.path.join(sparse0, file)
+			shutil.move(source_file, destination_file)
+
 
 def main():
 	parser = argparse.ArgumentParser()
-	parser.add_argument("--imagepath", default="", type=str)
+	parser.add_argument("--source_path", "-s", default="", type=str)
+	parser.add_argument("--calibration_file", "-c", default="calibration.json", type=str)
+	parser.add_argument("--gaussian_splatting", action="store_true")
+	parser.add_argument("--use_masks", action="store_true")
 	args = parser.parse_args()
 
-	image_path = args.imagepath
-	assert os.path.exists(image_path)
+	paths = load_paths(args)
 
-	print(f"Preparing data from '{image_path}'")
+	for k, v in paths.items():
+		print(f"{k:<20} -> {v}")
 
-	images = extract_images(image_path)
-	extract_masks(image_path, images)
+	assert os.path.exists(paths['base'])
 
-	extract_poses(image_path, images[0][-4:])
+	print(f"Preparing data from '{paths['base']}'")
 
-	run_colmap(image_path, images)
+	images = extract_images(paths)
+
+	if args.use_masks:
+		extract_masks(paths, images)
+
+	extract_poses(paths, images[0][-4:])
+
+	run_colmap(paths, args, images)
 
 if __name__ == "__main__":
 	main()
