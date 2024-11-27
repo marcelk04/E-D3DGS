@@ -12,6 +12,7 @@ path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
 from script.thirdparty.pre_colmap import *
+#from vci.COLMAPDatabase import *
 from script.thirdparty.my_utils import rotmat2qvec
 
 def create_dir(path: str) -> bool:
@@ -42,9 +43,7 @@ def extract_images(path: str) -> list[str]:
 	filenames = [os.path.basename(img) for img in images]
 
 	images_path = os.path.join(path, "colmap", "input")
-	if not os.path.exists(images_path):
-		os.makedirs(images_path)
-	else:
+	if not create_dir(images_path):
 		print(f"'{images_path}' already exists. Skipping image extraction!")
 		return filenames
 	
@@ -54,6 +53,26 @@ def extract_images(path: str) -> list[str]:
 	print(f"Copied {len(images)} images into '{images_path}'")
 
 	return filenames
+
+def extract_masks(path: str, filenames: list[str]) -> None:
+	if len(filenames) == 0:
+		print("Found no files. Skipping mask extraction!")
+		return
+
+	file_type = ".png"
+	masks = [file[:-4] + "_mask" for file in filenames]
+
+	masks_path = os.path.join(path, "colmap", "masks")
+	if not create_dir(masks_path):
+		print(f"'{masks_path}' already exists. Skipping mask extraction!")
+		return
+	
+	for file in filenames:
+		src_path = os.path.join(path, file[:-4] + "_mask.png")
+		dst_path = os.path.join(masks_path, file[:-4] + ".jpg.png")
+		shutil.copy(src_path, dst_path)
+
+	print(f"Copied {len(masks)} masks into '{masks_path}'")
 
 def extract_poses(path: str, data_type_suffix: str) -> None:
 	calibration_path = os.path.join(path, "calibration.json")
@@ -122,6 +141,7 @@ def extract_poses(path: str, data_type_suffix: str) -> None:
 		camera_id = db.add_camera(4, width, height, params)
 
 		image_id = db.add_image(image_name, camera_id, Q, T, image_id=i+1)
+		#image_id = db.add_image(image_name, camera_id, image_id=i+1)
 
 		db.commit()
 
@@ -129,6 +149,9 @@ def extract_poses(path: str, data_type_suffix: str) -> None:
 		Q_string = " ".join([str(q) for q in Q])
 		T_string = " ".join([str(t) for t in T])
 		params_string = " ".join([str(num) for num in params])
+
+		#camera_id = i+1
+		#image_id = camera_id
 
 		image_line = f"{image_id} {Q_string} {T_string} {camera_id} {image_name}\n"
 
@@ -172,6 +195,7 @@ def run_colmap(path: str, image_names: list[str]) -> None:
 
 	db_path = os.path.join(colmap_path, "input.db")
 	image_path = os.path.join(colmap_path, "input")
+	mask_path = os.path.join(colmap_path, "masks")
 	manual_path = os.path.join(colmap_path, "manual")
 
 	sparse_path = os.path.join(colmap_path, "distorted", "sparse")
@@ -190,11 +214,14 @@ def run_colmap(path: str, image_names: list[str]) -> None:
 	print("Starting COLMAP...")
 	print()
 
-	feature_extract = f"colmap feature_extractor --database_path {db_path} --image_path {image_path}"
+	feature_extract = f"colmap feature_extractor --database_path {db_path} --image_path {image_path} --ImageReader.mask_path {mask_path}" #  --ImageReader.mask_path {mask_path}
 	exec_cmd(feature_extract)
 
 	feature_matcher = f"colmap exhaustive_matcher --database_path {db_path}"
 	exec_cmd(feature_matcher)
+
+	mapper = f"colmap mapper --database_path {db_path} --image_path {image_path} --input_path {manual_path} --output_path {sparse_path}"
+	#exec_cmd(mapper)
 
 	tri_and_map = f"colmap point_triangulator --database_path {db_path} --image_path {image_path} --input_path {manual_path} --output_path {sparse_path}"
 	exec_cmd(tri_and_map)
@@ -205,7 +232,7 @@ def run_colmap(path: str, image_names: list[str]) -> None:
 	patch_match_stereo = f"colmap patch_match_stereo --workspace_path {dense_path}"
 	exec_cmd(patch_match_stereo)
 
-	stereo_fusion = f"colmap stereo_fusion --workspace_path {dense_path} --output_path {output_path}"
+	stereo_fusion = f"colmap stereo_fusion --workspace_path {dense_path} --output_path {output_path}" #
 	exec_cmd(stereo_fusion)
 
 	print(f"All done! The output is in '{output_path}'")
@@ -221,6 +248,7 @@ def main():
 	print(f"Preparing data from '{image_path}'")
 
 	images = extract_images(image_path)
+	extract_masks(image_path, images)
 
 	extract_poses(image_path, images[0][-4:])
 

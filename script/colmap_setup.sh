@@ -9,4 +9,4 @@ pip install Pillow
 # just some files need torch be installed.
 conda install pytorch==1.12.1 -c pytorch -c conda-forge
 conda config --set channel_priority false
-conda install colmap -c conda-forge
+conda install colmap=3.9 -c conda-forge
