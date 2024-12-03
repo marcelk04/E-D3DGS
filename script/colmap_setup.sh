@@ -6,6 +6,7 @@ pip install opencv-python-headless
 pip install tqdm
 pip install natsort
 pip install Pillow
+pip install scipy
 # just some files need torch be installed.
 conda install pytorch==1.12.1 -c pytorch -c conda-forge
 conda config --set channel_priority false

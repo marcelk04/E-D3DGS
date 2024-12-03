@@ -4,6 +4,8 @@ import glob
 import shutil
 import numpy as np
 import json
+from PIL import Image
+from tqdm import tqdm
 
 # dont question this ... :/
 from pathlib import Path
@@ -13,12 +15,19 @@ sys.path.append(str(path_root))
 
 from script.thirdparty.pre_colmap import *
 #from vci.COLMAPDatabase import *
-from script.thirdparty.my_utils import rotmat2qvec
+from vci.pose_utils import *
+from vci.sys_utils import *
 
+# Helper functions
 def load_paths(args: argparse.Namespace) -> dict[str, str]:
 	paths = {}
 	paths['base'] = args.source_path
 	paths['calibration'] = os.path.join(paths['base'], args.calibration_file)
+
+	if args.mask_source == "":
+		paths['mask_source'] = paths['base']
+	else:
+		paths['mask_source'] = args.mask_source
 
 	paths['colmap'] = os.path.join(paths['base'], "colmap")
 
@@ -50,26 +59,9 @@ def load_paths(args: argparse.Namespace) -> dict[str, str]:
 	paths['undistorted_images'] = os.path.join(paths['dense'], "images")
 
 	return paths
-	
 
-def create_dir(path: str) -> bool:
-	if not os.path.exists(path):
-		os.makedirs(path)
-		return True
-	
-	return False
-
-def exec_cmd(cmd: str) -> None:
-	print(f"Executing '{cmd}'")
-
-	exit_code = os.system(cmd)
-
-	if exit_code != 0:
-		exit(exit_code)
-
-	print()
-
-def extract_images(paths: dict[str, str]) -> list[str]:
+# Main functionality
+def extract_images(paths: dict[str, str], args: argparse.Namespace) -> list[str]:
 	"""
 	Finds all images matching the name C****.* in the directory given by path
 	and copies them into the directory colmap/input/.
@@ -82,30 +74,38 @@ def extract_images(paths: dict[str, str]) -> list[str]:
 	if not create_dir(paths['input']):
 		print(f"'{paths['input']}' already exists. Skipping image extraction!")
 		return filenames
+
+	s = 1.0 / args.resolution # Downscale factor
 	
-	for img in images:
-		shutil.copy(img, paths['input'])
+	for i, img in tqdm(enumerate(images), desc="Scaling and copying images", total=len(filenames)):
+		img_loaded = Image.open(img)
+		img_loaded = scale_image(img_loaded, s)
+		img_loaded.save(os.path.join(paths['input'], filenames[i]))
 
 	print(f"Copied {len(images)} images into '{paths['input']}'")
 
 	return filenames
 
-def extract_masks(paths: dict[str, str], filenames: list[str]) -> None:
+def extract_masks(paths: dict[str, str], filenames: list[str], args: argparse.Namespace) -> None:
 	if len(filenames) == 0:
 		print("Found no files. Skipping mask extraction!")
 		return
 
-	file_type = ".png"
 	masks = [file[:-4] + "_mask" for file in filenames]
 
 	if not create_dir(paths['masks']):
 		print(f"'{paths['masks']}' already exists. Skipping mask extraction!")
 		return
+
+	s = 1.0 / args.resolution
 	
-	for file in filenames:
-		src_path = os.path.join(paths['base'], file[:-4] + "_mask.png")
+	for i, file in tqdm(enumerate(filenames), desc="Scaling and copying masks", total=len(filenames)):
+		src_path = os.path.join(paths['mask_source'], file[:-4] + "_mask.png")
 		dst_path = os.path.join(paths['masks'], file[:-4] + ".jpg.png")
-		shutil.copy(src_path, dst_path)
+
+		mask_loaded = Image.open(src_path)
+		mask_loaded = scale_image(mask_loaded, s)
+		mask_loaded.save(dst_path)
 
 	print(f"Copied {len(masks)} masks into '{paths['masks']}'")
 
@@ -122,6 +122,7 @@ def extract_poses(paths: dict[str, str], args: argparse.Namespace, data_type_suf
 	assert os.path.exists(paths['calibration'])
 	calibration_file = open(paths['calibration'])
 	calibration = json.load(calibration_file)
+	calibration_file.close()
 
 	create_dir(paths['manual'])
 	create_dir(paths['distorted'])
@@ -139,38 +140,62 @@ def extract_poses(paths: dict[str, str], args: argparse.Namespace, data_type_suf
 
 	print(f"Start writing to new database at '{paths['db']}'")
 
-	for i, camera in enumerate(calibration["cameras"]):
-		# Extract information about the poses from the JSON file
+	for i, camera in tqdm(enumerate(calibration["cameras"]), desc="Reading camera calibration", total=len(calibration['cameras'])):
+		# Downscale factor
+		s = 1.0 / args.resolution
 
-		# TODO: why is resolution only 0.5 of the actual resolution?
-		width = camera["intrinsics"]["resolution"][0] * 2
-		height = camera["intrinsics"]["resolution"][1] * 2
+		# Extract pose information from the JSON file
 
 		camera_name = camera["camera_id"]
 		image_name = camera_name + data_type_suffix
-
+		
 		view_matrix = np.array(camera["extrinsics"]["view_matrix"]).reshape((4, 4))
-
-		T = view_matrix[:3, 3] # translation vector
-		R = view_matrix[:3, :3] # rotation matrix
-		Q = rotmat2qvec(R) # rotation quaternion (hopefully)
+		view_matrix = rotate_z_view_matrix(view_matrix)
 
 		camera_matrix = np.array(camera["intrinsics"]["camera_matrix"]).reshape((3, 3))
 
-		focal_length_x = camera_matrix[0, 0]
-		focal_length_y = camera_matrix[1, 1]
-
-		# TODO: again only 0.5x?
-		principal_point_x = camera_matrix[0, 2] * 2
-		principal_point_y = camera_matrix[1, 2] * 2
+		width = camera["intrinsics"]["resolution"][0]
+		height = camera["intrinsics"]["resolution"][1]
 
 		distortion_coefficients = np.array(camera["intrinsics"]["distortion_coefficients"])
 
+		# Camera rotation and translation
+		R = view_matrix[:3, :3]
+		T = view_matrix[:3, 3]
+		Q = rotation_matrix_to_quaternion(R)
+
+		# focal length
+		f_x = camera_matrix[0, 0]
+		f_y = camera_matrix[1, 1]
+
+		# principal point
+		c_x = camera_matrix[0, 2]
+		c_y = camera_matrix[1, 2]
+
+		# Camera C1004 (id 31) has different dimensions for some reason...
+		if width != 5328:
+			width *= 2
+			height *= 2
+			f_x *= 2
+			f_y *= 2
+			c_x *= 2
+			c_y *= 2
+
+		# Downscale
+		width *= s
+		height *= s
+
+		f_x *= s
+		f_y *= s
+
+		c_x *= s
+		c_y *= s
+
 		# Write camera and image data into database
 		if camera_model == 1: # PINHOLE
-			params = np.array([focal_length_x, focal_length_y, principal_point_x, principal_point_y])
+			params = np.array([f_x, f_y, c_x, c_y])
 		else: # OPENCV
-			params = np.array([focal_length_x, focal_length_y, principal_point_x, principal_point_y, distortion_coefficients[0], distortion_coefficients[1], distortion_coefficients[2], distortion_coefficients[3]])
+			params = np.array([f_x, f_y, c_x, c_y, distortion_coefficients[0], distortion_coefficients[1], distortion_coefficients[2], distortion_coefficients[3]])
 
 		camera_id = db.add_camera(camera_model, width, height, params)
 
@@ -196,40 +221,20 @@ def extract_poses(paths: dict[str, str], args: argparse.Namespace, data_type_suf
 		cameratxt_list.append(camera_line)
 
 	db.close()
-	calibration_file.close()
 
 	print("Done writing to database")
 	
 	# Write prepared data into images.txt and cameras.txt
-	with open(paths['imagestxt'], "w") as f:
-		for line in imagetxt_list:
-			f.write(line)
-
-	with open(paths['camerastxt'], "w") as f:
-		for line in cameratxt_list:
-			f.write(line)
-
-	with open(paths['points3Dtxt'], "w") as f:
-		pass
-
-def remove_undistorted_images(paths: dict[str, str], filenames: list[str]) -> int:
-	count = 0
-
-	for file in filenames:
-		filepath = os.path.join(paths["undistorted_images"], file)
-
-		if os.path.exists(filepath):
-			os.remove(filepath)
-			count += 1
-
-	return count
+	write_lines_to_file(imagetxt_list, paths['imagestxt'])
+	write_lines_to_file(cameratxt_list, paths['camerastxt'])
+	write_lines_to_file([], paths['points3Dtxt'])
 
 def run_colmap(paths: dict[str, str], args: argparse.Namespace, image_names: list[str]) -> None:
 	create_dir(paths['sparse'])
 	create_dir(paths['dense'])
 
 	# Clear colmap/dense/images
-	removed_images = remove_undistorted_images(paths, image_names)
+	removed_images = remove_files(paths['undistorted_images'], image_names)
 	print(f"Removed {removed_images} images from '{paths['undistorted_images']}'")
 	
 	# Colmap commands
@@ -251,8 +256,7 @@ def run_colmap(paths: dict[str, str], args: argparse.Namespace, image_names: lis
 		--database_path {paths['db']} \
 		--image_path {paths['input']} \
 		--input_path {paths['manual']} \
-		--output_path {paths['sparse']} \
-		--Mapper.ba_global_function_tolerance=0.000001" # --Mapper.min_num_matches 5 --Mapper.init_min_num_inliers 40 --Mapper.ba_global_function_tolerance=0.000001
+		--output_path {paths['sparse']}" # --Mapper.min_num_matches 5 --Mapper.init_min_num_inliers 40 --Mapper.ba_global_function_tolerance=0.000001
 	exec_cmd(tri_and_map)
 
 	image_undistortion = f"colmap image_undistorter \
@@ -291,15 +295,19 @@ def run_colmap(paths: dict[str, str], args: argparse.Namespace, image_names: lis
 def main():
 	parser = argparse.ArgumentParser(prog="python pre_vci.py", description="Generates a sparse/dense point cloud from a set of input images and camera poses generated by the VCI")
 	parser.add_argument("--source_path", "-s", default="", type=str, help="the path where the image files are located")
+	parser.add_argument("--mask_source", default="", type=str, help="the path to the image masks (default: source_path)")
+	parser.add_argument("--resolution", "-r", default=1, type=int, choices=[1,2,4,8])
 	parser.add_argument("--calibration_file", "-c", default="calibration.json", type=str, help="the name of the camera calibration file (default: %(default)s)")
 	parser.add_argument("--gaussian_splatting", action="store_true", help="enables output for 3d gaussian splatting")
 	parser.add_argument("--use_masks", action="store_true", help="enables usage of masks in the feature extractor")
 	parser.add_argument("--camera", default="OPENCV", type=str, choices=["OPENCV", "PINHOLE"], help="the camera model used when extracting the poses (default: %(default)s)")
 	args = parser.parse_args()
 
+	# Load all the paths from the passed arguments
 	paths = load_paths(args)
 	assert os.path.exists(paths['base'])
 
+	# Print out the paths
 	print("Set directories:")
 	for k, v in paths.items():
 		print(f"{k:<20} -> {v}")
@@ -307,10 +315,10 @@ def main():
 
 	print(f"Preparing data from '{paths['base']}'")
 
-	images = extract_images(paths)
+	images = extract_images(paths, args)
 
 	if args.use_masks:
-		extract_masks(paths, images)
+		extract_masks(paths, images, args)
 
 	extract_poses(paths, args, images[0][-4:])
 
