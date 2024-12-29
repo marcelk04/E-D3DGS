@@ -1,5 +1,6 @@
 __pycache__/
 output
+.vscode
 
 submodules/simple-knn/build/
 

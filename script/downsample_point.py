@@ -1,5 +1,6 @@
 import open3d as o3d
 import sys
+
 def process_ply_file(input_file, output_file):
     pcd = o3d.io.read_point_cloud(input_file)
     print(f"Total points: {len(pcd.points)}")
