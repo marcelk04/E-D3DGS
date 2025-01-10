@@ -1,3 +1,3 @@
-export CUDA_VISIBLE_DEVICES=6,7
+export CUDA_VISIBLE_DEVICES=7
 
-python pre_vci.py -s /data/student_kaempchen/ed3dgs-data/vci/stefan_sample -r 4 --gaussian_splatting -c /data/student_kaempchen/ed3dgs-data/vci/calibration_dome.json --use_masks --camera PINHOLE
+python pre_vci.py -s /data/student_kaempchen/ed3dgs-data/vci/sample_0014 --gaussian_splatting -r 4 --use_masks --camera SIMPLE_PINHOLE -c /data/student_kaempchen/ed3dgs-data/vci/calibration_dome.json

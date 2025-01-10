@@ -11,8 +11,15 @@ def lh_to_rh(matrix):
 	R = matrix[:3, :3]
 	T = matrix[:3, 3]
 
-	R = flip_x @ R
-	T = flip_x @ T
+	R_inv, P = view_matrix_inv_RT(R, T)
+
+	R_inv = flip_x @ R_inv
+	P = flip_x @ P
+
+	R, T = view_matrix_inv_RT(R_inv, P)
+
+	#R = flip_x @ R
+	#T = flip_x @ T
 
 	matrix[:3, :3] = R
 	matrix[:3, 3] = T
@@ -23,7 +30,8 @@ def rotate_z_view_matrix(matrix):
 	R = matrix[:3, :3]
 	T = matrix[:3, 3]
 
-	R_inv, T_inv = view_matrix_inv_RT(R, T)
+	# in camera to world space
+	R_inv, P = view_matrix_inv_RT(R, T)
 
 	R_z = np.array([
 		[0, 1, 0],
@@ -32,9 +40,10 @@ def rotate_z_view_matrix(matrix):
 	])
 
 	R_inv = R_z @ R_inv
-	T_inv = R_z @ T_inv
+	P = R_z @ P
 
-	R, T = view_matrix_inv_RT(R_inv, T_inv)
+	# in world to camera space
+	R, T = view_matrix_inv_RT(R_inv, P)
 
 	matrix[:3, :3] = R
 	matrix[:3, 3] = T
