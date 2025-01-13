@@ -1,11 +1,11 @@
-export CUDA_VISIBLE_DEVICES=6,7
+export CUDA_VISIBLE_DEVICES=6
 
 SAVE_PATH="output"
 
-DATASET="hypernerf"
-SCENE="vrig-chicken"
+DATASET="vci"
+SCENE="01_12_01_masks"
 
-CONFIG="vrig-chicken"
+CONFIG="default"
 
-python render.py --model_path $SAVE_PATH/$DATASET/$CONFIG --configs arguments/$DATASET/$CONFIG.py --skip_train
+python render.py --model_path $SAVE_PATH/$DATASET/$SCENE --configs arguments/$DATASET/$CONFIG.py --skip_train
 

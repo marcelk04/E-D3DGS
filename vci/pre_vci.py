@@ -2,10 +2,14 @@ import argparse
 import os
 import glob
 import shutil
-import numpy as np
 import json
 from PIL import Image, ImageChops
 from tqdm import tqdm
+
+import numpy as np
+from skimage import filters, transform
+import skimage as ski
+from scipy import ndimage
 
 # dont question this ... :/
 from pathlib import Path
@@ -15,6 +19,7 @@ sys.path.append(str(path_root))
 
 #from script.thirdparty.colmap_database_3_9 import *
 from script.thirdparty.colmap_database_3_10 import *
+from script.downsample_point import process_ply_file
 from vci.pose_utils import *
 from vci.sys_utils import *
 
@@ -24,11 +29,6 @@ def load_paths(args: argparse.Namespace) -> dict[str, str]:
 
 	paths['base'] = args.source_path
 	paths['calibration'] = os.path.join(paths['base'], args.calibration_file) # Will discard paths['base'] if args.calibration_file is an absolute path
-
-	if args.mask_source == "":
-		paths['mask_source'] = paths['base']
-	else:
-		paths['mask_source'] = args.mask_source
 
 	paths['colmap'] = os.path.join(paths['base'], "colmap")
 
@@ -57,6 +57,85 @@ def load_paths(args: argparse.Namespace) -> dict[str, str]:
 
 	return paths
 
+def cam_name(idx: int) -> str:
+	return "cam" + str(idx).zfill(2)
+
+def calculate_masks(frames, bgs):
+	diff = np.abs(frames - bgs)
+	diff = np.mean(diff, axis=-1)
+
+	#thres = ndimage.maximum_filter(diff, size=(3,3), axes=(1,2))
+	diff = ndimage.gaussian_filter(diff, sigma=5, axes=(-1, -2))
+
+	return np.where(diff < 0.05, 0.0, 1.0)
+
+def copy_images(paths: dict[str, str], args: argparse.Namespace) -> None:
+	frames = sorted([f for f in os.listdir(paths['base']) if f.startswith("frame")])
+	cameras = sorted([f for f in os.listdir(os.path.join(paths['base'], frames[0], "rgb"))])
+
+	num_frames = len(frames)
+	num_cams = len(cameras)
+	num_imgs = num_frames * num_cams
+
+	print(f"Number of frames: {num_frames}")
+	print(f"Number of cameras: {num_cams}")
+	print(f"Total number of images: {num_imgs}")
+	print()
+
+	# Read background images
+	bg_path = os.path.join(paths['base'], "background", "rgb", "*")
+	bgs = ski.io.imread_collection(bg_path, conserve_memory=False)
+
+	# Create image dir
+	if not create_dir(os.path.join(paths['base'], "images")):
+		print("Input folder already exists")
+
+		if not args.replace_images:
+			return
+		
+		print("Images will be replaced. If this is undesired, use --replace_images")
+	
+	for j, cam in enumerate(cameras):
+		create_dir(os.path.join(paths['base'], "images", cam_name(j)))
+
+	# Copy images
+	t = tqdm(desc="Copying images", total=num_imgs)
+	for i, frame in enumerate(frames):
+		for j, cam in enumerate(cameras):
+			src = os.path.join(paths['base'], frame, "rgb", cam)
+			dst = os.path.join(paths['base'], "images", cam_name(j), str(i).zfill(4) + ".jpg")
+
+			shutil.copyfile(src, dst)
+
+			t.update()
+	t.close()
+
+	# Mask them
+	if not args.use_masks:
+		return
+
+	t = tqdm(desc="Applying masks", total=num_imgs)
+	for j, cam in enumerate(cameras):
+		bg_img = bgs[j] / 255.0
+
+		cam_path = os.path.join(paths['base'], "images", cam_name(j))
+
+		frames_imgs = ski.io.imread_collection(os.path.join(cam_path, "*"), conserve_memory=False)
+
+		for i in range(len(frames)):
+			t.set_postfix({	"Camera": os.path.splitext(cam)[0],
+							"Image": i })
+
+			frame = frames_imgs[i] / 255.0
+			mask = calculate_masks(frame, bg_img)
+			masked = frame * mask[..., None]
+
+			ski.io.imsave(os.path.join(cam_path, str(i).zfill(4) + ".jpg"), np.uint8(masked * 255.0), check_contrast=False)
+
+			t.update()
+	t.close()
+
+
 # Main functionality
 def extract_images(paths: dict[str, str], args: argparse.Namespace) -> tuple[list[str], list[str]]:
 	"""
@@ -75,46 +154,43 @@ def extract_images(paths: dict[str, str], args: argparse.Namespace) -> tuple[lis
 
 	valid_filetypes = [".png", ".jpg"]
 
-	images = sorted([file for file in os.listdir(paths['base']) if os.path.splitext(file)[1] in valid_filetypes and "mask" not in file])
-	masks = sorted([file for file in os.listdir(paths['mask_source']) if os.path.splitext(file)[1] in valid_filetypes and "mask" in file])
+	img_path = os.path.join(paths['base'], "frame_00000", "rgb")
+	bg_path = os.path.join(paths['base'], "background", "rgb")
+
+	images = sorted([file for file in os.listdir(img_path) if os.path.splitext(file)[1] in valid_filetypes])
+	bgs = sorted([file for file in os.listdir(bg_path) if os.path.splitext(file)[1] in valid_filetypes])
 
 	# images.remove("C0018.jpg")
 	# masks.remove("C0018_mask.png")
 
-	print(f"Found {len(images)} images and {len(masks)} masks")
-
 	if len(images) == 0:
-		print("Skipping image extraction")
-		return (images, masks)
+		print("Found no images. Skipping image extraction")
+		return (images, bgs)
 	
 	copy_images = create_dir(paths['input'])
 	copy_masks = create_dir(paths['masks']) and args.use_masks
 
 	if not copy_images and not copy_masks:
 		print("Image and mask directories already exist. Skipping image extraction (if this is undesired, use --replace_images)")
-		return (images, masks)
+		return (images, bgs)
 
 	downscale_factor = 1.0 / args.resolution
 
 	for i, img_name in tqdm(enumerate(images), "Preparing input images", total=len(images)):
-		mask_name = masks[i]
+		img = ski.io.imread(os.path.join(img_path, img_name)) / 255.0
+		bg = ski.io.imread(os.path.join(bg_path, img_name)) / 255.0
 
-		img = Image.open(os.path.join(paths['base'], img_name))
-		mask = Image.open(os.path.join(paths['mask_source'], mask_name))
-
-		# Apply mask
 		if args.use_masks:
-			img = ImageChops.multiply(img, mask)
+			mask = calculate_masks(img, bg)
+			img *= mask[..., None]
 
-		if copy_images:
-			img = scale_image(img, downscale_factor)
-			img.save(os.path.join(paths['input'], img_name))
+			mask = transform.rescale(mask, downscale_factor, anti_aliasing=False)
+			ski.io.imsave(os.path.join(paths['masks'], cam_name(i) + ".jpg.png"), np.uint8(mask * 255.0), check_contrast=False)
 
-		if copy_masks:
-			mask = scale_image(mask, downscale_factor)
-			mask.save(os.path.join(paths['masks'], img_name + ".png")) # This is how COLMAP wants the masks
+		img = transform.rescale(img, downscale_factor, anti_aliasing=False)
+		ski.io.imsave(os.path.join(paths['input'], cam_name(i) + ".jpg"), np.uint8(img * 255.0), check_contrast=False)
 
-	return images, masks
+	return images, bgs
 
 def extract_poses(filenames: list[str], paths: dict[str, str], args: argparse.Namespace) -> None:
 	"""
@@ -164,6 +240,8 @@ def extract_poses(filenames: list[str], paths: dict[str, str], args: argparse.Na
 	avg_P = np.average(np.column_stack([-V[:3, :3].T @ V[:3, 3] for V in [np.array(cam["extrinsics"]["view_matrix"]).reshape((4, 4)) for cam in calibration["cameras"]]]), axis=1)
 	print(avg_P)
 
+	cam_idx = 0
+
 	for i, camera in tqdm(enumerate(calibration["cameras"]), desc="Reading camera calibration", total=len(calibration['cameras'])):
 		# Find corresponding images
 		camera_name = camera["camera_id"]
@@ -173,7 +251,8 @@ def extract_poses(filenames: list[str], paths: dict[str, str], args: argparse.Na
 			print(f"Missing image source for camera {camera_name}. Skipping this camera.")
 			continue
 
-		image_name = matching_images[0]
+		image_name = "cam" + str(cam_idx).zfill(2) + ".jpg"
+		cam_idx += 1
 
 		img = Image.open(os.path.join(paths['input'], image_name))
 		width, height = img.size
@@ -326,16 +405,14 @@ def run_colmap(image_names: list[str], paths: dict[str, str], args: argparse.Nam
 		stereo_fusion = f"colmap stereo_fusion \
 			--workspace_path {paths['dense']} \
 			--output_path {paths['output']} \
-			--output_type PLY \
-			--StereoFusion.mask_path {paths['masks']}" # --StereoFusion.mask_path {mask_path}
+			--output_type PLY" # --StereoFusion.mask_path {paths['masks']}
 		exec_cmd(stereo_fusion)
 
 		# Generate binary files
 		stereo_fusion_bin = f"colmap stereo_fusion \
 			--workspace_path {paths['dense']} \
 			--output_path {os.path.dirname(paths['output'])} \
-			--output_type BIN \
-			--StereoFusion.mask_path {paths['masks']}"
+			--output_type BIN" # --StereoFusion.mask_path {paths['masks']}
 		exec_cmd(stereo_fusion_bin)
 
 		print(f"All done! The output is in '{paths['output']}'")
@@ -398,11 +475,15 @@ def main():
 	print(f"Preparing data from '{paths['base']}'")
 	print()
 
+	copy_images(paths, args)
+
 	images, masks = extract_images(paths, args)
 
 	extract_poses(images, paths, args)
 
 	run_colmap(images, paths, args)
+
+	process_ply_file(paths['output'], os.path.join(paths['base'], "points3D_downsample.ply"))
 
 if __name__ == "__main__":
 	main()

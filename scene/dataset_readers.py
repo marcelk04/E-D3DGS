@@ -223,6 +223,47 @@ def readColmapCamerasTechnicolor(cam_extrinsics, cam_intrinsics, images_folder, 
     sys.stdout.write('\n')
     return cam_infos
 
+def readColmapCamerasVCI(cam_extrinsics, cam_intrinsics, images_folder, near, far, startime=0, duration=300):
+    cam_infos = []
+    for idx, key in tqdm(enumerate(cam_extrinsics), desc="Reading cameras", total=len(cam_extrinsics)):
+        extr = cam_extrinsics[key]
+        intr = cam_intrinsics[extr.camera_id]
+        height = intr.height
+        width = intr.width
+
+        uid = intr.id
+        R = np.transpose(qvec2rotmat(extr.qvec))
+        T = np.array(extr.tvec)
+
+        if intr.model=="SIMPLE_PINHOLE":
+            focal_length_x = intr.params[0]
+            FovY = focal2fov(focal_length_x, height)
+            FovX = focal2fov(focal_length_x, width)
+        elif intr.model=="PINHOLE":
+            focal_length_x = intr.params[0]
+            focal_length_y = intr.params[1] 
+            FovY = focal2fov(focal_length_y, height)
+            FovX = focal2fov(focal_length_x, width)
+        else:
+            assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
+
+        for j in range(startime, startime+int(duration)):
+            image_name = os.path.join(os.path.splitext(extr.name)[0], str(j).zfill(4) + ".jpg")
+            image_path = os.path.join(images_folder, "images", image_name)
+
+            assert os.path.exists(image_path), "Image {} does not exist!".format(image_path)
+            if j == startime:
+                image = Image.open(image_path)
+                image = image.resize((int(width), int(height)), Image.LANCZOS)
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=1, hpdirecitons=1,cxr=0.0, cyr=0.0)
+            else:
+                image = None
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=None, hpdirecitons=None, cxr=0.0, cyr=0.0)
+            cam_infos.append(cam_info)
+            
+    return cam_infos
+
+
 
 def normalize(v):
     return v / np.linalg.norm(v)
@@ -253,6 +294,61 @@ def storePly(path, xyz, rgb):
     vertex_element = PlyElement.describe(elements, 'vertex')
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
+
+def readColmapSceneInfoVCI(path, images, eval, duration=300, testonly=None):
+    try:
+        cameras_extrinsic_file = os.path.join(path, "colmap/dense/workspace/sparse", "images.bin")
+        cameras_intrinsic_file = os.path.join(path, "colmap/dense/workspace/sparse", "cameras.bin")
+        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    except:
+        cameras_extrinsic_file = os.path.join(path, "colmap/dense/workspace/sparse", "images.txt")
+        cameras_intrinsic_file = os.path.join(path, "colmap/dense/workspace/sparse", "cameras.txt")
+        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+
+    near = 0.01
+    far = 100
+
+    cam_infos_unsorted = readColmapCamerasVCI(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=path, near=near, far=far, duration=duration)    
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+    video_cam_infos = getSpiralColmap(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,near=near, far=far)
+
+    train_cam_infos = [_ for _ in cam_infos if "cam00" not in _.image_name]
+    test_cam_infos = [_ for _ in cam_infos if "cam00" in _.image_name]
+
+    uniquecheck = []
+    for cam_info in test_cam_infos:
+        if cam_info.image_name[:5] not in uniquecheck:
+            uniquecheck.append(cam_info.image_name[:5])
+    assert len(uniquecheck) == 1 
+    
+    sanitycheck = []
+    for cam_info in train_cam_infos:
+        if  cam_info.image_name[:5] not in sanitycheck:
+            sanitycheck.append( cam_info.image_name[:5])
+    for testname in uniquecheck:
+        assert testname not in sanitycheck
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+    ply_path = os.path.join(path, "points3D_downsample.ply")
+    
+    if not testonly:
+        try:
+            pcd = fetchPly(ply_path)
+        except Exception as e:
+            print("error:", e)
+            pcd = None
+    else:
+        pcd = None
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           video_cameras=video_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
 
 
 def readColmapSceneInfoDynerf(path, images, eval, duration=300, testonly=None):
@@ -399,6 +495,7 @@ sceneLoadTypeCallbacks = {
     "Technicolor": readColmapSceneInfoTechnicolor,
     "Nerfies": readHyperDataInfos,
     "Dynerf": readColmapSceneInfoDynerf,
+    "VCI": readColmapSceneInfoVCI
 }
 
 # modify the code in https://github.com/hustvl/4DGaussians/blob/master/scene/neural_3D_dataset_NDC.py

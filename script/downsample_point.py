@@ -13,4 +13,5 @@ def process_ply_file(input_file, output_file):
 
     o3d.io.write_point_cloud(output_file, pcd)
 
-process_ply_file(sys.argv[1], sys.argv[2])
+if __name__ == "__main__":
+    process_ply_file(sys.argv[1], sys.argv[2])
