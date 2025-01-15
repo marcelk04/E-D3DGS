@@ -53,7 +53,7 @@ class Scene:
         elif loader == "nerfies":
             scene_info = sceneLoadTypeCallbacks["Nerfies"](args.source_path, False, args.eval)
         elif loader == "vci":
-            scene_info = sceneLoadTypeCallbacks["VCI"](args.source_path, args.source_path, args.eval, duration=325)
+            scene_info = sceneLoadTypeCallbacks["VCI"](args.source_path, duration=325)
         else:
             assert False, "Could not recognize scene type!"
 

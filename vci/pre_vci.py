@@ -123,8 +123,8 @@ def copy_images(paths: dict[str, str], args: argparse.Namespace) -> None:
 		frames_imgs = ski.io.imread_collection(os.path.join(cam_path, "*"), conserve_memory=False)
 
 		for i in range(len(frames)):
-			t.set_postfix({	"Camera": os.path.splitext(cam)[0],
-							"Image": i })
+			t.set_postfix({	"Cam": os.path.splitext(cam)[0],
+							"Img": i })
 
 			frame = frames_imgs[i] / 255.0
 			mask = calculate_masks(frame, bg_img)
@@ -366,17 +366,14 @@ def run_colmap(image_names: list[str], paths: dict[str, str], args: argparse.Nam
 
 	feature_extract = f"colmap feature_extractor \
 		--database_path {paths['db']} \
-		--image_path {paths['input']} \
-		--SiftExtraction.estimate_affine_shape=true \
-		--SiftExtraction.domain_size_pooling=true "
+		--image_path {paths['input']}" # --SiftExtraction.estimate_affine_shape=true  --SiftExtraction.domain_size_pooling=true 
 	# Pass masks to colmap so there are no points generated for the background
 	if args.use_masks:
 		feature_extract += f" --ImageReader.mask_path {paths['masks']}"
 	exec_cmd(feature_extract)
 
 	feature_matcher = f"colmap exhaustive_matcher \
-		--database_path {paths['db']} \
-		--SiftMatching.guided_matching=true" # --TwoViewGeometry.min_num_inliers 5
+		--database_path {paths['db']}" # --TwoViewGeometry.min_num_inliers 5 --SiftMatching.guided_matching=true
 	exec_cmd(feature_matcher)
 
 	tri_and_map = f"colmap point_triangulator \
@@ -445,7 +442,7 @@ def main():
 	parser.add_argument("--replace_images", action="store_true", default=False, help="copies the images and masks into the input folder, replacing the old ones if necessary (default: %(default)s)")
 	parser.add_argument("--gaussian_splatting", action="store_true", default=False, help="enables output for 3d gaussian splatting (default: %(default)s)")
 	parser.add_argument("--skip_dense", action="store_true", default=False, help="skips dense reconstruction (True when --gaussian_splatting is set, default: %(default)s)")
-	parser.add_argument("--use_masks", action="store_true", default=False, help="enables usage of masks in the feature extractor (default: %(default)s)")
+	parser.add_argument("--use_masks", action="store_true", default=False, help="enables usage of masks during feature extraction (default: %(default)s)")
 	args = parser.parse_args()
 
 	if args.gaussian_splatting:

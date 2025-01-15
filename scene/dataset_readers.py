@@ -225,7 +225,7 @@ def readColmapCamerasTechnicolor(cam_extrinsics, cam_intrinsics, images_folder, 
 
 def readColmapCamerasVCI(cam_extrinsics, cam_intrinsics, images_folder, near, far, startime=0, duration=300):
     cam_infos = []
-    for idx, key in tqdm(enumerate(cam_extrinsics), desc="Reading cameras", total=len(cam_extrinsics)):
+    for idx, key in tqdm(enumerate(cam_extrinsics), desc="Loading training cameras", total=len(cam_extrinsics)):
         extr = cam_extrinsics[key]
         intr = cam_intrinsics[extr.camera_id]
         height = intr.height
@@ -295,7 +295,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfoVCI(path, images, eval, duration=300, testonly=None):
+def readColmapSceneInfoVCI(path, duration=300, testonly=None):
     try:
         cameras_extrinsic_file = os.path.join(path, "colmap/dense/workspace/sparse", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "colmap/dense/workspace/sparse", "cameras.bin")
@@ -314,15 +314,18 @@ def readColmapSceneInfoVCI(path, images, eval, duration=300, testonly=None):
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
     video_cam_infos = getSpiralColmap(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,near=near, far=far)
 
+    # Hold out cam00 from training and use it for testing
     train_cam_infos = [_ for _ in cam_infos if "cam00" not in _.image_name]
     test_cam_infos = [_ for _ in cam_infos if "cam00" in _.image_name]
 
+    # Assert that there is only one image/camera used for testing
     uniquecheck = []
     for cam_info in test_cam_infos:
         if cam_info.image_name[:5] not in uniquecheck:
             uniquecheck.append(cam_info.image_name[:5])
     assert len(uniquecheck) == 1 
     
+    # Assert that all iamges/cameras used for training are not used for testing
     sanitycheck = []
     for cam_info in train_cam_infos:
         if  cam_info.image_name[:5] not in sanitycheck:
@@ -550,11 +553,7 @@ def get_spiral(c2ws_all, near, far, rads_scale=0.25, N_views=120):
 
 def getSpiralColmap(cam_extrinsics, cam_intrinsics, near, far):
     c2ws_all = {}
-    for idx, key in enumerate(cam_extrinsics): 
-        sys.stdout.write('\r')
-        sys.stdout.write("Reading camera {}/{}".format(idx+1, len(cam_extrinsics)))
-        sys.stdout.flush()
-
+    for idx, key in tqdm(enumerate(cam_extrinsics), desc="Loading video cameras", total=len(cam_extrinsics)):
         extr = cam_extrinsics[key]
         intr = cam_intrinsics[extr.camera_id]
         height = intr.height
@@ -591,5 +590,4 @@ def getSpiralColmap(cam_extrinsics, cam_intrinsics, near, far):
         image = None
         cam_info = CameraInfo(uid=i, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=None, image_name=None, width=width, height=height, near=near, far=far, timestamp=i/(len(render_poses) - 1), pose=None, hpdirecitons=None, cxr=0.0, cyr=0.0)
         cam_infos.append(cam_info)
-    sys.stdout.write('\n')
     return cam_infos
