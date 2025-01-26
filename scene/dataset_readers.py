@@ -223,7 +223,7 @@ def readColmapCamerasTechnicolor(cam_extrinsics, cam_intrinsics, images_folder, 
     sys.stdout.write('\n')
     return cam_infos
 
-def readColmapCamerasVCI(cam_extrinsics, cam_intrinsics, images_folder, near, far, startime=0, duration=300):
+def readColmapCamerasVCI(cam_extrinsics, cam_intrinsics, images_folder, near, far, starttime, duration):
     cam_infos = []
     for idx, key in tqdm(enumerate(cam_extrinsics), desc="Loading training cameras", total=len(cam_extrinsics)):
         extr = cam_extrinsics[key]
@@ -239,26 +239,26 @@ def readColmapCamerasVCI(cam_extrinsics, cam_intrinsics, images_folder, near, fa
             focal_length_x = intr.params[0]
             FovY = focal2fov(focal_length_x, height)
             FovX = focal2fov(focal_length_x, width)
-        elif intr.model=="PINHOLE":
+        else:
             focal_length_x = intr.params[0]
             focal_length_y = intr.params[1] 
             FovY = focal2fov(focal_length_y, height)
             FovX = focal2fov(focal_length_x, width)
-        else:
-            assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
+        # else:
+        #     assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
 
-        for j in range(startime, startime+int(duration)):
+        for j in range(starttime, starttime+int(duration)):
             image_name = os.path.join(os.path.splitext(extr.name)[0], str(j).zfill(4) + ".jpg")
             image_path = os.path.join(images_folder, "images", image_name)
 
             assert os.path.exists(image_path), "Image {} does not exist!".format(image_path)
-            if j == startime:
+            if j == starttime:
                 image = Image.open(image_path)
                 image = image.resize((int(width), int(height)), Image.LANCZOS)
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=1, hpdirecitons=1,cxr=0.0, cyr=0.0)
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-starttime)/duration, pose=1, hpdirecitons=1,cxr=0.0, cyr=0.0)
             else:
                 image = None
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=None, hpdirecitons=None, cxr=0.0, cyr=0.0)
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-starttime)/duration, pose=None, hpdirecitons=None, cxr=0.0, cyr=0.0)
             cam_infos.append(cam_info)
             
     return cam_infos
@@ -295,7 +295,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfoVCI(path, duration=300, testonly=None):
+def readColmapSceneInfoVCI(path, duration, testonly=None):
     try:
         cameras_extrinsic_file = os.path.join(path, "colmap/dense/workspace/sparse", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "colmap/dense/workspace/sparse", "cameras.bin")
@@ -310,7 +310,7 @@ def readColmapSceneInfoVCI(path, duration=300, testonly=None):
     near = 0.01
     far = 100
 
-    cam_infos_unsorted = readColmapCamerasVCI(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=path, near=near, far=far, duration=duration)    
+    cam_infos_unsorted = readColmapCamerasVCI(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=path, near=near, far=far, starttime=0, duration=duration)    
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
     video_cam_infos = getSpiralColmap(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,near=near, far=far)
 
@@ -570,13 +570,13 @@ def getSpiralColmap(cam_extrinsics, cam_intrinsics, near, far):
         focal_length_x = intr.params[0]
         FovY = focal2fov(focal_length_x, height)
         FovX = focal2fov(focal_length_x, width)
-    elif intr.model=="PINHOLE":
+    else:
         focal_length_x = intr.params[0]
         focal_length_y = intr.params[1] 
         FovY = focal2fov(focal_length_y, height)
         FovX = focal2fov(focal_length_x, width)
-    else:
-        assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
+    # else:
+    #     assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
 
     height = intr.height
     width = intr.width

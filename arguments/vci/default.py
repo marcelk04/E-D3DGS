@@ -1,5 +1,7 @@
 ModelParams = dict(
-    loader = "vci"
+    loader = "vci",
+    white_background = False,
+    sh_degree = 3
 )
 
 ModelHiddenParams = dict(
@@ -22,7 +24,7 @@ OptimizationParams = dict(
     maxtime = 325,
 
     densify_from_iter = 5000,    
-    pruning_from_iter = 15000,
+    pruning_from_iter = 5000,
 
     densify_grad_threshold_fine_init = 0.0003,
     densify_grad_threshold_after = 0.0003,

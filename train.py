@@ -43,6 +43,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         gaussians.restore(model_params, opt)
 
     print(f"White background: {dataset.white_background}")
+    print(f"SH Degree: {dataset.sh_degree}")
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
@@ -51,11 +52,6 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
     ema_loss_for_log = 0.0
     ema_psnr_for_log = 0.0
-
-    final_iter = train_iter
-    
-    progress_bar = tqdm(range(first_iter, final_iter), desc="Training progress")
-    first_iter += 1
 
     train_cams = scene.getTrainCameras()
     test_cams = scene.getTestCameras()
@@ -94,6 +90,11 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
     viewpoint_stack = train_cams
     method = None
+    
+    final_iter = train_iter
+    
+    progress_bar = tqdm(range(first_iter, final_iter), desc="Training progress")
+    first_iter += 1
 
     start_time = time()
     for iteration in range(first_iter, final_iter+1):             

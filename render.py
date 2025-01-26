@@ -27,7 +27,7 @@ from time import time
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 
-def render_set(model_path, name, iteration, views, gaussians, pipeline, background, hyperparam=None):
+def render_set(model_path, name, iteration, views, gaussians, pipeline, background, save_images, hyperparam=None):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
 
@@ -54,11 +54,16 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         rendering = render(view, gaussians, pipeline, background, iter=iteration, num_down_emb_c=num_down_emb_c, num_down_emb_f=num_down_emb_f)["render"]
         time2 = time()
         total_time += (time2 - time1)
-        render_images.append(to8b(rendering).transpose(1,2,0))
-        torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(count) + ".png"))
+
+        img = to8b(rendering).transpose(1,2,0)
+
+        render_images.append(np.rot90(img, 3, axes=(0,1)))
+
+        if save_images:
+            torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(count) + ".png"))
         # render_list.append(rendering)
     
-        if name in ["train", "test"]:
+        if name in ["train", "test"] and save_images:
             gt = view.original_image[0:3, :, :]
             torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(count) + ".png"))
             # gt_list.append(gt)
@@ -82,7 +87,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'video_rgb.mp4'), render_images, fps=30, quality=8)
 
 
-def render_sets(dataset : ModelParams, hyperparam, opt, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool):
+def render_sets(dataset : ModelParams, hyperparam, opt, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, save_images: bool):
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree, hyperparam)
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False, duration=hyperparam.total_num_frames, loader=dataset.loader, opt=opt)
@@ -90,12 +95,14 @@ def render_sets(dataset : ModelParams, hyperparam, opt, iteration : int, pipelin
         bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
+        cams = [cam for cam in scene.getTrainCameras() if cam.cam_no == 2]
+
         if not skip_train:
-            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, hyperparam=hyperparam)
+            render_set(dataset.model_path, "train", scene.loaded_iter, cams, gaussians, pipeline, background, save_images, hyperparam=hyperparam)
         if not skip_test:
-            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, hyperparam=hyperparam)
+            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, save_images, hyperparam=hyperparam)
         if not skip_video:
-            render_set(dataset.model_path, "video", scene.loaded_iter, scene.getVideoCameras(), gaussians, pipeline, background, hyperparam=hyperparam)
+            render_set(dataset.model_path, "video", scene.loaded_iter, scene.getVideoCameras(), gaussians, pipeline, background, save_images, hyperparam=hyperparam)
 
 
 if __name__ == "__main__":
@@ -108,8 +115,9 @@ if __name__ == "__main__":
     parser.add_argument("--iteration", default=-1, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
-    parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--skip_video", action="store_true")
+    parser.add_argument("--save_images", action="store_true")
+    parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--configs", type=str)
     
     # import sys
@@ -124,5 +132,5 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    render_sets(model.extract(args), hyperparam.extract(args), opt.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.skip_video)
+    render_sets(model.extract(args), hyperparam.extract(args), opt.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.skip_video, args.save_images)
     # CUDA_VISIBLE_DEVICES=2 python render.py --model_path output/dynerf/coffee_martini_wo_cam13 --skip_train --configs arguments/dynerf/coffee_martini_wo_cam13.py

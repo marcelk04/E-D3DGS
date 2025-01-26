@@ -3,13 +3,13 @@ import os
 import glob
 import shutil
 import json
-from PIL import Image, ImageChops
+from PIL import Image
 from tqdm import tqdm
+import torch
 
 import numpy as np
-from skimage import filters, transform
+from skimage import transform
 import skimage as ski
-from scipy import ndimage
 
 # dont question this ... :/
 from pathlib import Path
@@ -17,11 +17,14 @@ import sys
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
-#from script.thirdparty.colmap_database_3_9 import *
-from script.thirdparty.colmap_database_3_10 import *
+from script.thirdparty.colmap_database_3_9 import *
+#from script.thirdparty.colmap_database_3_10 import *
 from script.downsample_point import process_ply_file
 from vci.pose_utils import *
 from vci.sys_utils import *
+from vci.mask_utils import *
+
+from submodules.BackgroundMattingV2.model.model import MattingRefine
 
 # Helper functions
 def load_paths(args: argparse.Namespace) -> dict[str, str]:
@@ -29,6 +32,8 @@ def load_paths(args: argparse.Namespace) -> dict[str, str]:
 
 	paths['base'] = args.source_path
 	paths['calibration'] = os.path.join(paths['base'], args.calibration_file) # Will discard paths['base'] if args.calibration_file is an absolute path
+
+	paths['bg_src'] = os.path.join(paths['base'], "background", "rgb")
 
 	paths['colmap'] = os.path.join(paths['base'], "colmap")
 
@@ -52,92 +57,96 @@ def load_paths(args: argparse.Namespace) -> dict[str, str]:
 		paths['sparse'] = os.path.join(paths['distorted'], "sparse")
 		paths['dense'] = os.path.join(paths['colmap'], "dense", "workspace")
 
-	paths['output'] = os.path.join(paths['dense'], "fused.ply")
 	paths['undistorted_images'] = os.path.join(paths['dense'], "images")
+	paths['output'] = os.path.join(paths['dense'], "fused.ply")
+	paths['output_downsample'] = os.path.join(paths['base'], "points3D_downsample.ply")
 
 	return paths
 
 def cam_name(idx: int) -> str:
 	return "cam" + str(idx).zfill(2)
 
-def calculate_masks(frames, bgs):
-	diff = np.abs(frames - bgs)
-	diff = np.mean(diff, axis=-1)
+def prepare_input_images_ed3dgs(paths: dict[str, str], args: argparse.Namespace) -> tuple[int, int]:
+	"""
+	"""
 
-	#thres = ndimage.maximum_filter(diff, size=(3,3), axes=(1,2))
-	diff = ndimage.gaussian_filter(diff, sigma=5, axes=(-1, -2))
-
-	return np.where(diff < 0.05, 0.0, 1.0)
-
-def copy_images(paths: dict[str, str], args: argparse.Namespace) -> None:
-	frames = sorted([f for f in os.listdir(paths['base']) if f.startswith("frame")])
-	cameras = sorted([f for f in os.listdir(os.path.join(paths['base'], frames[0], "rgb"))])
+	frames = sorted([f for f in os.listdir(paths['base']) if f.startswith("frame")]) # Directory names (frame_00000, frame_00001, ...)
+	cameras = sorted([f for f in os.listdir(os.path.join(paths['base'], frames[0], "rgb"))]) # File names (C0000.jpg, C0001.jpg, ...)
 
 	num_frames = len(frames)
 	num_cams = len(cameras)
-	num_imgs = num_frames * num_cams
 
 	print(f"Number of frames: {num_frames}")
 	print(f"Number of cameras: {num_cams}")
-	print(f"Total number of images: {num_imgs}")
+	print(f"Total number of images: {num_frames * num_cams}")
 	print()
 
 	# Read background images
-	bg_path = os.path.join(paths['base'], "background", "rgb", "*")
-	bgs = ski.io.imread_collection(bg_path, conserve_memory=False)
+	bgs = ski.io.imread_collection(os.path.join(paths['bg_src'], "*"), conserve_memory=False)
+	#bgs = bgs.concatenate() / 255.0 # Concatenate images into np array
 
 	# Create image dir
 	if not create_dir(os.path.join(paths['base'], "images")):
-		print("Input folder already exists")
-
 		if not args.replace_images:
-			return
+			print("E-D3DGS input directory already exists. Skipping image extraction (if this is undesired, use --replace_images)")
+			return num_frames, num_cams
 		
-		print("Images will be replaced. If this is undesired, use --replace_images")
+		print("E-D3DGS input images will be replaced")
 	
+	# Create cam dirs (images/cam00, images/cam01, ...)
 	for j, cam in enumerate(cameras):
 		create_dir(os.path.join(paths['base'], "images", cam_name(j)))
 
-	# Copy images
-	t = tqdm(desc="Copying images", total=num_imgs)
+	if not args.remove_background:
+		# Simply copy the images to the images folder
+		progress_bar = tqdm(desc="Copying images", total=num_frames*num_cams)
+
+		for i, frame in enumerate(frames):
+			for j, cam in enumerate(cameras):
+				src = os.path.join(paths['base'], frame, "rgb", cam)
+				dst = os.path.join(paths['base'], "images", cam_name(j), str(i).zfill(4) + ".jpg")
+
+				shutil.copyfile(src, dst)
+
+				progress_bar.update()
+		progress_bar.close()
+
+		return num_frames, num_cams
+	
+	# Load model for removing the backgrounds
+	model = MattingRefine(backbone="mobilenetv2", backbone_scale=0.25, refine_mode="sampling", refine_sample_pixels=80000)
+
+	model.load_state_dict(torch.load("pytorch_mobilenetv2.pth", weights_only=True))
+	model = model.eval().to(torch.float32).to(torch.device("cuda"))
+
+	# Apply masks and save images in images folder
+	progress_bar = tqdm(desc="Removing background", total=num_frames*num_cams)
+
 	for i, frame in enumerate(frames):
+		frame_path = os.path.join(paths['base'], frame, "rgb")
+
 		for j, cam in enumerate(cameras):
-			src = os.path.join(paths['base'], frame, "rgb", cam)
-			dst = os.path.join(paths['base'], "images", cam_name(j), str(i).zfill(4) + ".jpg")
+			progress_bar.set_postfix({ "Cam": os.path.splitext(cam)[0], "Img": i })
 
-			shutil.copyfile(src, dst)
+			# Load input image
+			frame_img = ski.io.imread(os.path.join(frame_path, cam)) / 255.0
 
-			t.update()
-	t.close()
+			# Calculate mask and store it in alpha channel
+			masked, mask = calculate_mask(frame_img, bgs[j] / 255.0, model)
 
-	# Mask them
-	if not args.use_masks:
-		return
+			# Save as png to keep alpha channel
+			dst_path = os.path.join(paths['base'], "images", cam_name(j), str(i).zfill(4) + ".jpg")
+			ski.io.imsave(dst_path, np.uint8(masked * 255.0), check_contrast=False)
 
-	t = tqdm(desc="Applying masks", total=num_imgs)
-	for j, cam in enumerate(cameras):
-		bg_img = bgs[j] / 255.0
+			progress_bar.update()
 
-		cam_path = os.path.join(paths['base'], "images", cam_name(j))
+	progress_bar.close()
 
-		frames_imgs = ski.io.imread_collection(os.path.join(cam_path, "*"), conserve_memory=False)
-
-		for i in range(len(frames)):
-			t.set_postfix({	"Cam": os.path.splitext(cam)[0],
-							"Img": i })
-
-			frame = frames_imgs[i] / 255.0
-			mask = calculate_masks(frame, bg_img)
-			masked = frame * mask[..., None]
-
-			ski.io.imsave(os.path.join(cam_path, str(i).zfill(4) + ".jpg"), np.uint8(masked * 255.0), check_contrast=False)
-
-			t.update()
-	t.close()
+	return num_frames, num_cams
 
 
 # Main functionality
-def extract_images(paths: dict[str, str], args: argparse.Namespace) -> tuple[list[str], list[str]]:
+def prepare_input_images_colmap(paths: dict[str, str], args: argparse.Namespace) -> tuple[list[str], list[str]]:
 	"""
 	Extract the images and masks provided in paths['base'] and paths['mask_source'] respectively. The
 	files will be copied into paths['input'] and paths['masks'] respectively. If --resolution is set
@@ -155,10 +164,8 @@ def extract_images(paths: dict[str, str], args: argparse.Namespace) -> tuple[lis
 	valid_filetypes = [".png", ".jpg"]
 
 	img_path = os.path.join(paths['base'], "frame_00000", "rgb")
-	bg_path = os.path.join(paths['base'], "background", "rgb")
-
 	images = sorted([file for file in os.listdir(img_path) if os.path.splitext(file)[1] in valid_filetypes])
-	bgs = sorted([file for file in os.listdir(bg_path) if os.path.splitext(file)[1] in valid_filetypes])
+	bgs = sorted([file for file in os.listdir(paths['bg_src']) if os.path.splitext(file)[1] in valid_filetypes])
 
 	# images.remove("C0018.jpg")
 	# masks.remove("C0018_mask.png")
@@ -168,7 +175,7 @@ def extract_images(paths: dict[str, str], args: argparse.Namespace) -> tuple[lis
 		return (images, bgs)
 	
 	copy_images = create_dir(paths['input'])
-	copy_masks = create_dir(paths['masks']) and args.use_masks
+	copy_masks = create_dir(paths['masks']) and args.remove_background
 
 	if not copy_images and not copy_masks:
 		print("Image and mask directories already exist. Skipping image extraction (if this is undesired, use --replace_images)")
@@ -176,18 +183,27 @@ def extract_images(paths: dict[str, str], args: argparse.Namespace) -> tuple[lis
 
 	downscale_factor = 1.0 / args.resolution
 
+	model = MattingRefine(backbone="mobilenetv2", backbone_scale=0.25, refine_mode="sampling", refine_sample_pixels=80000)
+
+	model.load_state_dict(torch.load("pytorch_mobilenetv2.pth", weights_only=True))
+	model = model.eval().to(torch.float32).to(torch.device("cuda"))
+
 	for i, img_name in tqdm(enumerate(images), "Preparing input images", total=len(images)):
-		img = ski.io.imread(os.path.join(img_path, img_name)) / 255.0
-		bg = ski.io.imread(os.path.join(bg_path, img_name)) / 255.0
+		img_src = ski.io.imread(os.path.join(img_path, img_name)) / 255.0
 
-		if args.use_masks:
-			mask = calculate_masks(img, bg)
-			img *= mask[..., None]
+		if args.remove_background:
+			bg_src = ski.io.imread(os.path.join(paths['bg_src'], img_name)) / 255.0
 
+			img, mask = calculate_mask(img_src, bg_src, model)
+			
 			mask = transform.rescale(mask, downscale_factor, anti_aliasing=False)
-			ski.io.imsave(os.path.join(paths['masks'], cam_name(i) + ".jpg.png"), np.uint8(mask * 255.0), check_contrast=False)
 
-		img = transform.rescale(img, downscale_factor, anti_aliasing=False)
+			ski.io.imsave(os.path.join(paths['masks'], cam_name(i) + ".jpg.png"), np.uint8(mask * 255.0), check_contrast=False)
+		else:
+			img = img_src
+
+		img = transform.rescale(img_src, downscale_factor, anti_aliasing=False) # TODO
+
 		ski.io.imsave(os.path.join(paths['input'], cam_name(i) + ".jpg"), np.uint8(img * 255.0), check_contrast=False)
 
 	return images, bgs
@@ -208,11 +224,7 @@ def extract_poses(filenames: list[str], paths: dict[str, str], args: argparse.Na
 	"""
 
 	# Set camera model
-	camera_models = {"SIMPLE_PINHOLE": 0, "PINHOLE": 1 , "OPENCV": 4 }
-	if not args.camera in camera_models.keys():
-		print(f"Unsupported camera model: {args.camera}")
-		exit()
-
+	camera_models = {"SIMPLE_PINHOLE": 0, "PINHOLE": 1, "RADIAL": 3, "OPENCV": 4, "RADIAL_FISHEYE": 9 }
 	camera_model = camera_models[args.camera]
 	
 	# Downscale factor
@@ -229,6 +241,10 @@ def extract_poses(filenames: list[str], paths: dict[str, str], args: argparse.Na
 	db_dir = os.path.dirname(paths['db'])
 	create_dir(db_dir)
 
+	# Calculate camera center to shift camera positions to the origin
+	avg_P = np.average(np.column_stack([-V[:3, :3].T @ V[:3, 3] for V in [np.array(cam["extrinsics"]["view_matrix"]).reshape((4, 4)) for cam in calibration["cameras"]]]), axis=1)
+	print(f"Camera center: {avg_P}")
+
 	imagetxt_list = []
 	cameratxt_list = []
 
@@ -236,9 +252,6 @@ def extract_poses(filenames: list[str], paths: dict[str, str], args: argparse.Na
 	db.create_tables()
 
 	print(f"Start writing to new database at '{paths['db']}'")
-
-	avg_P = np.average(np.column_stack([-V[:3, :3].T @ V[:3, 3] for V in [np.array(cam["extrinsics"]["view_matrix"]).reshape((4, 4)) for cam in calibration["cameras"]]]), axis=1)
-	print(avg_P)
 
 	cam_idx = 0
 
@@ -252,27 +265,27 @@ def extract_poses(filenames: list[str], paths: dict[str, str], args: argparse.Na
 			continue
 
 		image_name = "cam" + str(cam_idx).zfill(2) + ".jpg"
-		cam_idx += 1
 
 		img = Image.open(os.path.join(paths['input'], image_name))
 		width, height = img.size
 
 		# Extract pose information from the JSON file
-		view_matrix = np.array(camera["extrinsics"]["view_matrix"]).reshape((4, 4)) # View Matrix is given in World-To-Camera Space (i think)
+		view_matrix = np.array(camera["extrinsics"]["view_matrix"], dtype=np.float64).reshape((4, 4)) # View Matrix is given in World-To-Camera Space (i think)
 		view_matrix = rotate_z_view_matrix(view_matrix)
 
-		camera_matrix = np.array(camera["intrinsics"]["camera_matrix"]).reshape((3, 3))
+		camera_matrix = np.array(camera["intrinsics"]["camera_matrix"], dtype=np.float64).reshape((3, 3))
 
-		distortion_coefficients = np.array(camera["intrinsics"]["distortion_coefficients"])
+		distortion_coefficients = np.array(camera["intrinsics"]["distortion_coefficients"], dtype=np.float64)
 
 		# Camera rotation and translation
 		R = view_matrix[:3, :3]
 		T = view_matrix[:3, 3]
 		Q = rotation_matrix_to_quaternion(R)
 
-		P = -R.T @ T
-		P -= avg_P
-		T = -R @ P
+		# Shift camera positions
+		#P = -R.T @ T
+		#P -= avg_P
+		#T = -R @ P
 
 		# focal length
 		f_x = camera_matrix[0, 0]
@@ -309,11 +322,17 @@ def extract_poses(filenames: list[str], paths: dict[str, str], args: argparse.Na
 			params = np.array([f_x, f_y, c_x, c_y])
 		elif args.camera == "OPENCV":
 			params = np.array([f_x, f_y, c_x, c_y, distortion_coefficients[0], distortion_coefficients[1], distortion_coefficients[2], distortion_coefficients[3]])
+			# params = np.array([f_x, f_y, c_x, c_y, 0, 0, 0, 0])
+		elif args.camera == "RADIAL":
+			params = np.array([f_x, c_x, c_y, distortion_coefficients[0], distortion_coefficients[1]])
+		elif args.camera == "RADIAL_FISHEYE":
+			params = np.array([f_x, c_x, c_y, distortion_coefficients[0], distortion_coefficients[1]])
+			# params = np.array([f_x, c_x, c_y, 0, 0])
 
 		camera_id = db.add_camera(camera_model, width, height, params)
 
-		#image_id = db.add_image(image_name, camera_id, Q, T, image_id=i+1) # For COLMAP <= 3.9
-		image_id = db.add_image(image_name, camera_id, image_id=i+1) # For COLMAP >= 3.10
+		image_id = db.add_image(image_name, camera_id, Q, T, image_id=i+1) # For COLMAP <= 3.9
+		#image_id = db.add_image(image_name, camera_id, image_id=i+1) # For COLMAP >= 3.10
 
 		#db.add_pose_prior(image_id, P)
 
@@ -330,6 +349,8 @@ def extract_poses(filenames: list[str], paths: dict[str, str], args: argparse.Na
 
 		camera_line = f"{camera_id} {args.camera} {width} {height} {params_string}\n"
 		cameratxt_list.append(camera_line)
+		
+		cam_idx += 1
 
 	db.close()
 
@@ -342,7 +363,16 @@ def extract_poses(filenames: list[str], paths: dict[str, str], args: argparse.Na
 
 	print("Done writing text output")
 
-def run_colmap(image_names: list[str], paths: dict[str, str], args: argparse.Namespace) -> None:
+def fake_undistorted_data(paths: dict[str, str]) -> None:
+	# Sparse data
+	for f in os.listdir(paths['sparse']):
+		shutil.copy(os.path.join(paths['sparse'], f), os.path.join(paths['dense'], "sparse", f))
+
+	# Images
+	for f in os.listdir(paths['input']):
+		shutil.copy(os.path.join(paths['input'], f), os.path.join(paths['dense'], "images", f))
+
+def run_colmap(paths: dict[str, str], args: argparse.Namespace) -> None:
 	"""
 	Executes the COLMAP command, producing a sparse or dense reconstruction of the
 	input images.
@@ -366,14 +396,17 @@ def run_colmap(image_names: list[str], paths: dict[str, str], args: argparse.Nam
 
 	feature_extract = f"colmap feature_extractor \
 		--database_path {paths['db']} \
-		--image_path {paths['input']}" # --SiftExtraction.estimate_affine_shape=true  --SiftExtraction.domain_size_pooling=true 
+		--image_path {paths['input']} \
+		--SiftExtraction.estimate_affine_shape=true \
+		--SiftExtraction.domain_size_pooling=true" # --SiftExtraction.estimate_affine_shape=true  --SiftExtraction.domain_size_pooling=true 
 	# Pass masks to colmap so there are no points generated for the background
-	if args.use_masks:
+	if args.remove_background:
 		feature_extract += f" --ImageReader.mask_path {paths['masks']}"
 	exec_cmd(feature_extract)
 
 	feature_matcher = f"colmap exhaustive_matcher \
-		--database_path {paths['db']}" # --TwoViewGeometry.min_num_inliers 5 --SiftMatching.guided_matching=true
+		--database_path {paths['db']} \
+		--SiftMatching.guided_matching=true" # --TwoViewGeometry.min_num_inliers 5 --SiftMatching.guided_matching=true
 	exec_cmd(feature_matcher)
 
 	tri_and_map = f"colmap point_triangulator \
@@ -395,8 +428,13 @@ def run_colmap(image_names: list[str], paths: dict[str, str], args: argparse.Nam
 	exec_cmd(image_undistortion)
 
 	if not args.skip_dense:
+		fake_undistorted_data(paths)
+
 		patch_match_stereo = f"colmap patch_match_stereo \
-			--workspace_path {paths['dense']}"
+			--workspace_path {paths['dense']} \
+			--log_level 1 \
+			--PatchMatchStereo.window_radius 20 \
+			--PatchMatchStereo.filter_min_ncc 0.02"
 		exec_cmd(patch_match_stereo)
 
 		stereo_fusion = f"colmap stereo_fusion \
@@ -413,7 +451,8 @@ def run_colmap(image_names: list[str], paths: dict[str, str], args: argparse.Nam
 		exec_cmd(stereo_fusion_bin)
 
 		print(f"All done! The output is in '{paths['output']}'")
-	else:
+
+	if args.gaussian_splatting:
 		sparse = os.path.join(paths['dense'], "sparse")
 		sparse0 = os.path.join(paths['dense'], "sparse", "0")
 
@@ -431,18 +470,68 @@ def run_colmap(image_names: list[str], paths: dict[str, str], args: argparse.Nam
 
 	print("Done.")
 
+def run_colmap_mapper(paths: dict[str, str], args: argparse.Namespace) -> None:
+	# Create necessary directories
+	create_dir(paths['sparse'])
+	create_dir(paths['dense'])
+	
+	# Colmap commands
+	print("Starting COLMAP...")
+	print()
+
+	feature_extract = f"colmap feature_extractor \
+		--database_path {paths['db']} \
+		--image_path {paths['input']}" # --SiftExtraction.estimate_affine_shape=true  --SiftExtraction.domain_size_pooling=true 
+	# Pass masks to colmap so there are no points generated for the background
+	if args.remove_background:
+		feature_extract += f" --ImageReader.mask_path {paths['masks']}"
+	exec_cmd(feature_extract)
+
+	feature_matcher = f"colmap exhaustive_matcher \
+		--database_path {paths['db']}" # --SiftMatching.guided_matching=true
+	exec_cmd(feature_matcher)
+
+	mapper = f"colmap mapper \
+		--database_path {paths['db']} \
+		--image_path {paths['input']} \
+		--output_path {paths['sparse']}"
+	exec_cmd(mapper)
+
+	image_undistortion = f"colmap image_undistorter \
+		--image_path {paths['input']} \
+		--input_path {os.path.join(paths['sparse'], '0')} \
+		--output_path {paths['dense']} \
+		--output_type COLMAP"
+	exec_cmd(image_undistortion)
+
+	if not args.skip_dense:
+		patch_match_stereo = f"colmap patch_match_stereo \
+			--workspace_path {paths['dense']} \
+			--workspace_format COLMAP \
+			--PatchMatchStereo.geom_consistency true"
+		exec_cmd(patch_match_stereo)
+
+		stereo_fusion = f"colmap stereo_fusion \
+			--workspace_path {paths['dense']} \
+			--workspace_format COLMAP \
+			--input_type geometric \
+			--output_path {paths['output']} \
+			--output_type PLY" # --StereoFusion.mask_path {paths['masks']}
+		exec_cmd(stereo_fusion)
+
+		print(f"All done! The output is in '{paths['output']}'")
+
 
 def main():
 	parser = argparse.ArgumentParser(prog="python pre_vci.py", description="Generates a sparse/dense point cloud from a set of input images and camera poses generated by the VCI")
 	parser.add_argument("--source_path", "-s", default="", type=str, required=True, help="the path where the image files are located")
-	parser.add_argument("--mask_source", default="", type=str, help="the path to the image masks (default: source_path)")
 	parser.add_argument("--calibration_file", "-c", default="calibration.json", type=str, help="the path to the camera calibration file (default: %(default)s)")
 	parser.add_argument("--resolution", "-r", default=1, type=int, choices=[1,2,4,8], help="downscale the image by factor r (default: %(default)s)")
-	parser.add_argument("--camera", default="PINHOLE", type=str, choices=["SIMPLE_PINHOLE", "PINHOLE", "OPENCV"], help="the camera model used when extracting the poses (default: %(default)s)")
-	parser.add_argument("--replace_images", action="store_true", default=False, help="copies the images and masks into the input folder, replacing the old ones if necessary (default: %(default)s)")
-	parser.add_argument("--gaussian_splatting", action="store_true", default=False, help="enables output for 3d gaussian splatting (default: %(default)s)")
-	parser.add_argument("--skip_dense", action="store_true", default=False, help="skips dense reconstruction (True when --gaussian_splatting is set, default: %(default)s)")
-	parser.add_argument("--use_masks", action="store_true", default=False, help="enables usage of masks during feature extraction (default: %(default)s)")
+	parser.add_argument("--camera", default="PINHOLE", type=str, choices=["SIMPLE_PINHOLE", "PINHOLE", "OPENCV", "RADIAL", "RADIAL_FISHEYE"], help="the camera model used when extracting the poses (default: %(default)s)")
+	parser.add_argument("--replace_images", action="store_true", default=False, help="delete previously generated input images and replace them by newly generated ones (default: %(default)s)")
+	parser.add_argument("--gaussian_splatting", action="store_true", default=False, help="enable output for 3d gaussian splatting (default: %(default)s)")
+	parser.add_argument("--skip_dense", action="store_true", default=False, help="skip dense reconstruction (True when --gaussian_splatting is set, default: %(default)s)")
+	parser.add_argument("--remove_background", action="store_true", default=False, help="use BackgroundMattingV2 to remove the background (default: %(default)s)")
 	args = parser.parse_args()
 
 	if args.gaussian_splatting:
@@ -472,15 +561,17 @@ def main():
 	print(f"Preparing data from '{paths['base']}'")
 	print()
 
-	copy_images(paths, args)
+	#prepare_input_images_ed3dgs(paths, args)
 
-	images, masks = extract_images(paths, args)
+	images, bgs = prepare_input_images_colmap(paths, args)
 
-	extract_poses(images, paths, args)
+	#extract_poses(images, paths, args)
 
-	run_colmap(images, paths, args)
+	# run_colmap(paths, args)
+	run_colmap_mapper(paths, args)
 
-	process_ply_file(paths['output'], os.path.join(paths['base'], "points3D_downsample.ply"))
+	# if not args.skip_dense:
+	# 	process_ply_file(paths['output'], paths['output_downsample'])
 
 if __name__ == "__main__":
 	main()

@@ -4,25 +4,34 @@ def lh_to_rh(matrix):
 	if matrix.shape != (4, 4):
 		raise ValueError("The input matrix has to have shape (4, 4)")
 	
-	# Entlang der yz-Ebene flippen
-	flip_x = np.eye(3)
+	flip_x = np.identity(4)
 	flip_x[0, 0] = -1
 
-	R = matrix[:3, :3]
-	T = matrix[:3, 3]
+	matrix_inv = view_matrix_inv(matrix)
 
-	R_inv, P = view_matrix_inv_RT(R, T)
+	matrix_inv = matrix_inv @ flip_x
 
-	R_inv = flip_x @ R_inv
-	P = flip_x @ P
+	matrix = view_matrix_inv(matrix_inv)
+	
+	# Entlang der yz-Ebene flippen
+	# flip_x = np.eye(3)
+	# flip_x[0, 0] = -1
 
-	R, T = view_matrix_inv_RT(R_inv, P)
+	# R = matrix[:3, :3]
+	# T = matrix[:3, 3]
 
-	#R = flip_x @ R
-	#T = flip_x @ T
+	# R_inv, P = view_matrix_inv_RT(R, T)
 
-	matrix[:3, :3] = R
-	matrix[:3, 3] = T
+	# R_inv = flip_x @ R_inv
+	# P = flip_x @ P
+
+	# R, T = view_matrix_inv_RT(R_inv, P)
+
+	# #R = flip_x @ R
+	# #T = flip_x @ T
+
+	# matrix[:3, :3] = R
+	# matrix[:3, 3] = T
 
 	return matrix
 
@@ -64,6 +73,8 @@ def view_matrix_inv(matrix):
 
 	matrix[:3, :3] = R_inv
 	matrix[:3, 3] = T_inv
+
+	return matrix
 
 def rotation_matrix_to_quaternion(matrix):
 	trace = np.trace(matrix)
