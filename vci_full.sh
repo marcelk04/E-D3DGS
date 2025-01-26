@@ -5,12 +5,12 @@ SAVE_PATH="output"
 
 DATASET="vci"
 SCENE="2024_12_12_dynamic3"
-NAME="01_25_01"
+NAME="01_26_02"
 
 CONFIG="default"
 
 python train.py -s $GT_PATH/$SCENE --model_path $SAVE_PATH/$DATASET/$NAME --expname $DATASET/$SCENE --configs arguments/$DATASET/$CONFIG.py -r 1
 
-python render.py --model_path $SAVE_PATH/$DATASET/$NAME --skip_train --configs arguments/$DATASET/$CONFIG.py
+python render.py --model_path $SAVE_PATH/$DATASET/$NAME --configs arguments/$DATASET/$CONFIG.py
 
 #python metrics.py --model_path $SAVE_PATH/$DATASET/$CONFIG

@@ -124,20 +124,22 @@ def run_colmap_mapper(paths: dict[str, str], args: argparse.Namespace) -> None:
 		--database_path {paths['db']} \
 		--image_path {paths['input']} \
 		--ImageReader.camera_model {args.camera} \
-		--ImageReader.single_camera_per_image true" # --SiftExtraction.estimate_affine_shape=true  --SiftExtraction.domain_size_pooling=true 
+		--ImageReader.single_camera_per_image true"
 	# Pass masks to colmap so there are no points generated for the background
 	if args.remove_background:
 		feature_extract += f" --ImageReader.mask_path {paths['masks']}"
 	exec_cmd(feature_extract)
 
 	feature_matcher = f"colmap exhaustive_matcher \
-		--database_path {paths['db']}" # --SiftMatching.guided_matching=true
+		--database_path {paths['db']}"
 	exec_cmd(feature_matcher)
 
 	mapper = f"colmap mapper \
 		--database_path {paths['db']} \
 		--image_path {paths['input']} \
-		--output_path {paths['sparse']}"
+		--output_path {paths['sparse']} \
+		--Mapper.ba_global_function_tolerance 0.000001 \
+		--Mapper.multiple_models false"
 	exec_cmd(mapper)
 
 	image_undistortion = f"colmap image_undistorter \
@@ -159,7 +161,9 @@ def run_colmap_mapper(paths: dict[str, str], args: argparse.Namespace) -> None:
 			--workspace_format COLMAP \
 			--input_type geometric \
 			--output_path {paths['output']} \
-			--output_type PLY" # --StereoFusion.mask_path {paths['masks']}
+			--output_type PLY"
+		if args.remove_background:
+			stereo_fusion += f" --StereoFusion.mask_path {paths['masks']}"
 		exec_cmd(stereo_fusion)
 
 		print(f"All done! The output is in '{paths['output']}'")
