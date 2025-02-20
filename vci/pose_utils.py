@@ -76,32 +76,29 @@ def view_matrix_inv(matrix):
 
 	return matrix
 
-def rotation_matrix_to_quaternion(matrix):
-	trace = np.trace(matrix)
+def normalize_poses(poses):
+	cameras = poses["cameras"]
 
-	if trace > 0:
-		s = 2.0 * np.sqrt(trace + 1.0)
-		q_w = 0.25 * s
-		q_x = (matrix[2, 1] - matrix[1, 2]) / s
-		q_y = (matrix[0, 2] - matrix[2, 0]) / s
-		q_z = (matrix[1, 0] - matrix[0, 1]) / s
-	elif (matrix[0, 0] > matrix[1, 1]) and (matrix[0, 0] > matrix[2, 2]):
-		s = 2.0 * np.sqrt(1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2])
-		q_w = (matrix[2, 1] - matrix[1, 2]) / s
-		q_x = 0.25 * s
-		q_y = (matrix[0, 1] + matrix[1, 0]) / s
-		q_z = (matrix[0, 2] + matrix[2, 0]) / s
-	elif matrix[1, 1] > matrix[2, 2]:
-		s = 2.0 * np.sqrt(1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2])
-		q_w = (matrix[0, 2] - matrix[2, 0]) / s
-		q_x = (matrix[0, 1] + matrix[1, 0]) / s
-		q_y = 0.25 * s
-		q_z = (matrix[1, 2] + matrix[2, 1]) / s
-	else:
-		s = 2.0 * np.sqrt(1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1])
-		q_w = (matrix[1, 0] - matrix[0, 1]) / s
-		q_x = (matrix[0, 2] + matrix[2, 0]) / s
-		q_y = (matrix[1, 2] + matrix[2, 1]) / s
-		q_z = 0.25 * s
+	cam_origin = [cam for cam in cameras if cam["camera_id"] == "cam02.jpg" or cam["camera_id"] == "C0004"][0]
+	origin_view_matrix = np.array(cam_origin["extrinsics"]["view_matrix"]).reshape((4, 4))
+	p_origin = origin_view_matrix[:3, 3]
+	inv_rot_origin = np.linalg.inv(origin_view_matrix[:3, :3])
 
-	return np.array([q_w, q_x, q_y, q_z])
+	for cam in cameras:
+		view_matrix = view_matrix_inv(np.array(cam["extrinsics"]["view_matrix"]).reshape((4,4)))
+
+		P = view_matrix[:3, 3]
+		R = view_matrix[:3, :3]
+
+		#P -= p_origin
+		P = inv_rot_origin @ P
+
+		R = inv_rot_origin @ R
+
+		view_matrix[:3, 3] = P
+		view_matrix[:3, :3] = R
+
+		cam["extrinsics"]["view_matrix"] = view_matrix_inv(view_matrix).flatten().tolist()
+
+	return poses
+	

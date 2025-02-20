@@ -14,7 +14,7 @@ def fake_undistorted_data(paths: dict[str, str]) -> None:
 		shutil.copy(os.path.join(paths['input'], f), os.path.join(paths['dense'], "images", f))
 
 
-def run_colmap(paths: dict[str, str], args: argparse.Namespace) -> None:
+def run_colmap_poses(paths: dict[str, str], args: argparse.Namespace) -> None:
 	"""
 	Executes the COLMAP command, producing a sparse or dense reconstruction of the
 	input images.
@@ -35,79 +35,13 @@ def run_colmap(paths: dict[str, str], args: argparse.Namespace) -> None:
 	print("Starting COLMAP...")
 	print()
 
-	feature_extract = f"colmap feature_extractor \
-		--database_path {paths['db']} \
-		--image_path {paths['input']} \
-		--SiftExtraction.estimate_affine_shape=true \
-		--SiftExtraction.domain_size_pooling=true" # --SiftExtraction.estimate_affine_shape=true  --SiftExtraction.domain_size_pooling=true 
-	# Pass masks to colmap so there are no points generated for the background
-	if args.remove_background:
-		feature_extract += f" --ImageReader.mask_path {paths['masks']}"
-	exec_cmd(feature_extract)
-
-	feature_matcher = f"colmap exhaustive_matcher \
-		--database_path {paths['db']} \
-		--SiftMatching.guided_matching=true" # --TwoViewGeometry.min_num_inliers 5 --SiftMatching.guided_matching=true
-	exec_cmd(feature_matcher)
-
-	tri_and_map = f"colmap point_triangulator \
-		--database_path {paths['db']} \
-		--image_path {paths['input']} \
-		--input_path {paths['manual']} \
-		--output_path {paths['sparse']} \
-		--Mapper.ba_global_function_tolerance=0.000001 \
-		--Mapper.ba_refine_focal_length=0 \
-		--Mapper.ba_refine_principal_point=0 \
-		--Mapper.ba_refine_extra_params=0 \
-		--refine_intrinsics=0" # --Mapper.min_num_matches 5 --Mapper.init_min_num_inliers 40 --Mapper.ba_global_function_tolerance=0.000001
-	exec_cmd(tri_and_map)
-
-	image_undistortion = f"colmap image_undistorter \
-		--image_path {paths['input']} \
-		--input_path {paths['sparse']} \
-		--output_path {paths['dense']}"
-	exec_cmd(image_undistortion)
+	sparse_reconstruction_poses(paths, args)
 
 	if not args.skip_dense:
-		fake_undistorted_data(paths)
-
-		patch_match_stereo = f"colmap patch_match_stereo \
-			--workspace_path {paths['dense']} \
-			--log_level 1 \
-			--PatchMatchStereo.window_radius 20 \
-			--PatchMatchStereo.filter_min_ncc 0.02"
-		exec_cmd(patch_match_stereo)
-
-		stereo_fusion = f"colmap stereo_fusion \
-			--workspace_path {paths['dense']} \
-			--output_path {paths['output']} \
-			--output_type PLY" # --StereoFusion.mask_path {paths['masks']}
-		exec_cmd(stereo_fusion)
-
-		# Generate binary files
-		stereo_fusion_bin = f"colmap stereo_fusion \
-			--workspace_path {paths['dense']} \
-			--output_path {os.path.dirname(paths['output'])} \
-			--output_type BIN" # --StereoFusion.mask_path {paths['masks']}
-		exec_cmd(stereo_fusion_bin)
-
-		print(f"All done! The output is in '{paths['output']}'")
+		dense_reconstruction(paths, args)
 
 	if args.gaussian_splatting:
-		sparse = os.path.join(paths['dense'], "sparse")
-		sparse0 = os.path.join(paths['dense'], "sparse", "0")
-
-		files = os.listdir(sparse)
-		create_dir(sparse0)
-
-		# Copy each file from the source directory to the destination directory (required by 3DGS)
-		for file in files:
-			if file == '0':
-				continue
-
-			source_file = os.path.join(sparse, file)
-			destination_file = os.path.join(sparse0, file)
-			shutil.move(source_file, destination_file)
+		copy_sparse(paths)
 
 	print("Done.")
 
@@ -120,18 +54,35 @@ def run_colmap_mapper(paths: dict[str, str], args: argparse.Namespace) -> None:
 	print("Starting COLMAP...")
 	print()
 
+	sparse_reconstruction_mapper(paths, args)
+
+	if not args.skip_dense:
+		dense_reconstruction(paths, args)
+
+	if args.gaussian_splatting:
+		copy_sparse(paths)
+
+	print("Done.")
+
+def sparse_reconstruction_mapper(paths: dict[str, str], args: argparse.Namespace) -> None:
+	print("Starting sparse reconstruction...")
+	print()
+
 	feature_extract = f"colmap feature_extractor \
 		--database_path {paths['db']} \
 		--image_path {paths['input']} \
 		--ImageReader.camera_model {args.camera} \
-		--ImageReader.single_camera_per_image true"
-	# Pass masks to colmap so there are no points generated for the background
+		--ImageReader.single_camera_per_image false \
+		--SiftExtraction.estimate_affine_shape=true \
+		--SiftExtraction.domain_size_pooling=true \
+		--SiftExtraction.use_gpu true"
 	if args.remove_background:
 		feature_extract += f" --ImageReader.mask_path {paths['masks']}"
 	exec_cmd(feature_extract)
 
 	feature_matcher = f"colmap exhaustive_matcher \
-		--database_path {paths['db']}"
+		--database_path {paths['db']} \
+		--SiftMatching.guided_matching=true"
 	exec_cmd(feature_matcher)
 
 	mapper = f"colmap mapper \
@@ -149,37 +100,80 @@ def run_colmap_mapper(paths: dict[str, str], args: argparse.Namespace) -> None:
 		--output_type COLMAP"
 	exec_cmd(image_undistortion)
 
-	if not args.skip_dense:
-		patch_match_stereo = f"colmap patch_match_stereo \
-			--workspace_path {paths['dense']} \
-			--workspace_format COLMAP \
-			--PatchMatchStereo.geom_consistency true"
-		exec_cmd(patch_match_stereo)
+	print("Sparse reconstruction done.")
+	print()
 
-		stereo_fusion = f"colmap stereo_fusion \
-			--workspace_path {paths['dense']} \
-			--workspace_format COLMAP \
-			--input_type geometric \
-			--output_path {paths['output']} \
-			--output_type PLY"
-		if args.remove_background:
-			stereo_fusion += f" --StereoFusion.mask_path {paths['masks']}"
-		exec_cmd(stereo_fusion)
+def sparse_reconstruction_poses(paths: dict[str, str], args: argparse.Namespace) -> None:
+	print("Starting sparse reconstruction...")
+	print()
 
-		print(f"All done! The output is in '{paths['output']}'")
+	feature_extract = f"colmap feature_extractor \
+		--database_path {paths['db']} \
+		--image_path {paths['input']} \
+		--SiftExtraction.estimate_affine_shape=true \
+		--SiftExtraction.domain_size_pooling=true" # --SiftExtraction.estimate_affine_shape=true  --SiftExtraction.domain_size_pooling=true 
+	# Pass masks to colmap so there are no points generated for the background
+	if args.remove_background:
+		feature_extract += f" --ImageReader.mask_path {paths['masks']}"
+	exec_cmd(feature_extract)
 
-	if args.gaussian_splatting:
-		sparse = os.path.join(paths['dense'], "sparse")
-		sparse0 = os.path.join(paths['dense'], "sparse", "0")
+	feature_matcher = f"colmap exhaustive_matcher \
+		--database_path {paths['db']} \
+		--SiftMatching.guided_matching=true" # --SiftMatching.guided_matching=true
+	exec_cmd(feature_matcher)
 
-		files = os.listdir(sparse)
-		create_dir(sparse0)
+	tri_and_map = f"colmap point_triangulator \
+		--database_path {paths['db']} \
+		--image_path {paths['input']} \
+		--input_path {paths['manual']} \
+		--output_path {paths['sparse']} \
+		--Mapper.ba_global_function_tolerance=0.000001" # --Mapper.ba_global_function_tolerance=0.000001
+	exec_cmd(tri_and_map)
 
-		# Copy each file from the source directory to the destination directory (required by 3DGS)
-		for file in files:
-			if file == '0':
-				continue
+	image_undistortion = f"colmap image_undistorter \
+		--image_path {paths['input']} \
+		--input_path {paths['sparse']} \
+		--output_path {paths['dense']}"
+	exec_cmd(image_undistortion)
 
-			source_file = os.path.join(sparse, file)
-			destination_file = os.path.join(sparse0, file)
-			shutil.move(source_file, destination_file)
+	print("Sparse reconstruction done.")
+	print()
+
+def dense_reconstruction(paths: dict[str, str], args: argparse.Namespace) -> None:
+	print("Starting dense reconstruction...")
+	print()
+
+	patch_match_stereo = f"colmap patch_match_stereo \
+		--workspace_path {paths['dense']} \
+		--workspace_format COLMAP \
+		--PatchMatchStereo.geom_consistency true"
+	exec_cmd(patch_match_stereo)
+
+	stereo_fusion = f"colmap stereo_fusion \
+		--workspace_path {paths['dense']} \
+		--workspace_format COLMAP \
+		--input_type geometric \
+		--output_path {paths['output']} \
+		--output_type PLY"
+	if args.remove_background:
+		stereo_fusion += f" --StereoFusion.mask_path {paths['masks']}"
+	exec_cmd(stereo_fusion)
+	
+	print("Dense reconstruction done.")
+	print()
+
+def copy_sparse(paths: dict[str, str]) -> None:
+	sparse = os.path.join(paths['dense'], "sparse")
+	sparse0 = os.path.join(paths['dense'], "sparse", "0")
+
+	files = os.listdir(sparse)
+	create_dir(sparse0)
+
+	# Copy each file from the source directory to the destination directory (required by 3DGS)
+	for file in files:
+		if file == '0':
+			continue
+
+		source_file = os.path.join(sparse, file)
+		destination_file = os.path.join(sparse0, file)
+		shutil.move(source_file, destination_file)

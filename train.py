@@ -10,6 +10,7 @@
 #
 import math
 import numpy as np
+from matplotlib import pyplot as plt
 import random
 import os
 import torch
@@ -42,8 +43,6 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
 
-    print(f"White background: {dataset.white_background}")
-    print(f"SH Degree: {dataset.sh_degree}")
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
@@ -52,6 +51,9 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
     ema_loss_for_log = 0.0
     ema_psnr_for_log = 0.0
+    loss_list_log = []
+    psnr_list_log = []
+    test_list_log = []
 
     train_cams = scene.getTrainCameras()
     test_cams = scene.getTestCameras()
@@ -232,20 +234,37 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             if iteration == opt.iterations:
                 progress_bar.close()
 
+            loss_list_log.append(loss.item())
+            psnr_list_log.append(psnr_.cpu())
+
             # Log and save
             timer.pause()
  
-            if (iteration in saving_iterations):
+            if iteration in saving_iterations:
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
 
+            if iteration in testing_iterations:
+                testing_psnr = []
+
+                for test_cam in test_cams:
+                    if type(test_cam.original_image) == type(None):
+                        test_cam.load_image()
+
+                    test_render = render(test_cam, gaussians, pipe, background, iter=iteration, num_down_emb_c=hyper.min_embeddings, num_down_emb_f=hyper.min_embeddings)["render"]
+
+                    testing_psnr.append(psnr(test_render, test_cam.original_image.cuda()).cpu())
+
+                test_list_log.append(np.array(testing_psnr).mean())
+
+            # Does not work
             if dataset.render_process:
                 if (iteration < 1000 and iteration % 10 == 1) \
                     or (iteration < 3000 and iteration % 50 == 1) \
                         or (iteration < 10000 and iteration %  100 == 1) \
                             or (iteration < 60000 and iteration % 100 ==1):
 
-                    render_training_image(scene, gaussians, test_cams, render, pipe, background, iteration-1,timer.get_elapsed_time())
+                    render_training_image(scene, gaussians, test_cams, render, pipe, background, 0, iteration-1, timer.get_elapsed_time())
 
             timer.start()
             # Densification
@@ -277,6 +296,17 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+
+    fig, ax = plt.subplots(3, 1, figsize=(30, 25))
+
+    x = np.arange(opt.iterations)
+    ax[0].set_title("Loss")
+    ax[0].plot(x, loss_list_log)
+    ax[1].set_title("Train PSNR")
+    ax[1].plot(x, psnr_list_log)
+    ax[2].set_title("Validation PSNR")
+    ax[2].plot(testing_iterations[:len(test_list_log)], test_list_log)
+    fig.savefig(os.path.join(scene.model_path, "loss.png"))
 
 
 def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, expname):
@@ -311,7 +341,7 @@ def prepare_output_and_logger(expname):
         cfg_log_f.write(str(Namespace(**vars(args))))
 
 
-        
+
 def setup_seed(seed):
      torch.manual_seed(seed)
      torch.cuda.manual_seed_all(seed)
@@ -334,7 +364,7 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*500 for i in range(0,120)])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*500 for i in range(1,120)])
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[3000, 5000, 7000, 14000, 20000, 30000, 45000, 60000, 80000, 100000, 120000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
@@ -343,13 +373,13 @@ if __name__ == "__main__":
     parser.add_argument("--configs", type=str, default = "")
     
     args = parser.parse_args(sys.argv[1:])
-    args.save_iterations.append(args.iterations)
     if args.configs:
         import mmcv
         from utils.params_utils import merge_hparams
         config = mmcv.Config.fromfile(args.configs)
         args = merge_hparams(args, config)
     print("Optimizing " + args.model_path)
+    args.save_iterations.append(args.iterations)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)

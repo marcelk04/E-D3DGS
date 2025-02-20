@@ -228,7 +228,7 @@ class GaussianModel:
         return l
 
     def load_model(self, path):
-        print("loading model from exists{}".format(path))
+        print("Loading model from {}".format(path))
         weight_dict = torch.load(os.path.join(path,"deformation.pth"),map_location="cuda")
         self._deformation.load_state_dict(weight_dict)
         self._deformation = self._deformation.to("cuda")

@@ -39,7 +39,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     deform_vertices = []
 
     num_down_emb_c = hyperparam.min_embeddings
-    num_down_emb_f = hyperparam.min_embeddings    
+    num_down_emb_f = hyperparam.min_embeddings
     
     count = 0
     total_time = 0
@@ -55,9 +55,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         time2 = time()
         total_time += (time2 - time1)
 
-        img = to8b(rendering).transpose(1,2,0)
-
-        render_images.append(np.rot90(img, 3, axes=(0,1)))
+        render_images.append(to8b(rendering).transpose(1,2,0))
 
         if save_images:
             torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(count) + ".png"))
@@ -123,7 +121,7 @@ if __name__ == "__main__":
     # import sys
     # args = parser.parse_args(sys.argv[1:])
     args = get_combined_args(parser)
-    print("Rendering " , args.model_path)
+    print("Rendering", args.model_path)
     if args.configs:
         import mmcv
         from utils.params_utils import merge_hparams
