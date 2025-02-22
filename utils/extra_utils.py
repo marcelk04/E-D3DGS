@@ -62,6 +62,12 @@ def calculate_distances(cameras):
 
 
 def sample_camera(distances, last_camera_index, min_distance):
+    """
+    Finds a random camera whose distance to last_camera_index is
+    at least min_distance. If there is no such camera, a random
+    camera will be returned.
+    """
+
     last_camera_distances = distances[last_camera_index]
     valid_indices = np.where(last_camera_distances >= min_distance)[0]
     valid_indices = valid_indices[valid_indices != last_camera_index]

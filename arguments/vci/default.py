@@ -14,7 +14,7 @@ ModelHiddenParams = dict(
 	no_ds = False,
 	no_dr = False,
 	no_do = False,
-	no_dc = False,
+	no_dc = True,
 	
 	temporal_embedding_dim = 256,
 	gaussian_embedding_dim = 32,
@@ -34,7 +34,7 @@ OptimizationParams = dict(
 	dataloader = True,
 	iterations = 40_000,
 	maxtime = 325,
-	batch_size = 1,
+	batch_size = 5,
 	
 	position_lr_init = 0.00004,
 	position_lr_final = 0.0000004,
@@ -54,7 +54,7 @@ OptimizationParams = dict(
 	
 	percent_dense = 0.01,
 	lambda_dssim = 1.0,
-	lambda_lpips = 0,
+	lambda_lpips = 0, # unused?
 	
 	weight_constraint_init = 1,
 	weight_constraint_after = 0.2,
@@ -72,7 +72,7 @@ OptimizationParams = dict(
 	opacity_threshold_fine_init = 0.005,
 	opacity_threshold_fine_after = 0.005,
 	reset_opacity_ratio = 0,
-	opacity_l1_coef_fine = 0.0001,
+	opacity_l1_coef_fine = 0,
 	
 	scene_bbox_min = [-2.5, -2.0, -1.0],
 	scene_bbox_max = [2.5, 2.0, 1.0],
@@ -82,9 +82,9 @@ OptimizationParams = dict(
 	
 	use_dense_colmap = False,
 	use_colmap = True,
-	coef_tv_temporal_embedding = 0.0001,
-	random_until = 40000,
-	num_multiview_ssim = 2,
+	coef_tv_temporal_embedding = 0.001,
+	random_until = 60000,
+	num_multiview_ssim = 5,
 	offsets_lr = 0.00002,
-	reg_coef = 1.0,
+	reg_coef = 0.01,
 )

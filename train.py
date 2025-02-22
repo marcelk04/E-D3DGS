@@ -70,7 +70,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         cam_dists = calculate_distances(camera_centers)
         sorted_dists = np.unique(cam_dists)
         min_dist = sorted_dists[int(sorted_dists.shape[0] * 0.5)]
-
+        
         last_camera_index = 0
     
     cam_no_list = list(set(c.cam_no for c in train_cams))
@@ -108,7 +108,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
-        # opt.batch_size = 2
+        # Sample camera
         ### Instead of the complex process below, simply training on random frames will also work well. If you follow this, comment out the `train_cams` sorting process above.
         if dataset.loader == 'nerfies':
             frame_set = np.random.choice(range(math.ceil(len(viewpoint_stack) / 2)), size=max(opt.batch_size // 2, 1))
@@ -134,21 +134,27 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
+
         images = []
         gt_images = []
         radii_list = []
         visibility_filter_list = []
         viewspace_point_tensor_list = []
         cam_no_list, frame_no_list = [], []
+
         for viewpoint_cam in viewpoint_cams:
             if type(viewpoint_cam.original_image) == type(None):
                 viewpoint_cam.load_image()  # for lazy loading (to avoid OOM issue)
+
             cam_no = viewpoint_cam.cam_no
             frame_no = viewpoint_cam.frame_no
+
             cam_no_list.append(cam_no)
             frame_no_list.append(frame_no)
+
             render_pkg = render(viewpoint_cam, gaussians, pipe, background, cam_no=cam_no, iter=iteration, \
                 num_down_emb_c=hyper.min_embeddings, num_down_emb_f=hyper.min_embeddings)
+            
             image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
             images.append(image.unsqueeze(0))
@@ -158,13 +164,12 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
 
-            # TODO
             viewpoint_cam.original_image = None
         
-        radii = torch.cat(radii_list,0).max(dim=0).values
-        visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
         image_tensor = torch.cat(images,0)
         gt_image_tensor = torch.cat(gt_images,0)
+        radii = torch.cat(radii_list,0).max(dim=0).values
+        visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
 
         
         Ll1 = l1_loss(image_tensor, gt_image_tensor, keepdim=True)
@@ -177,7 +182,6 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         else:
             loss = Ll1
 
-        psnr_ = psnr(image_tensor, gt_image_tensor).mean().double()
         for i in range(len(Ll1_items)):
             loss_list[cam_no_list[i], frame_no_list[i]] = Ll1_items[i].item()
 
@@ -212,23 +216,16 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
         iter_end.record()
 
-        if iteration in saving_iterations:
-            elapsed_time = time()
-            
-            total_time_seconds = elapsed_time - start_time
-            hours, remainder = divmod(total_time_seconds, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            with open(os.path.join(args.model_path, 'training_time.txt'), 'a') as file:
-                file.write(f'Iteration {iteration}: {total_time_seconds} seconds ... {int(hours)}h {int(minutes)}m {seconds}sec  points: {gaussians._xyz.shape[0]}\n')
-
         with torch.no_grad():
-            # Progress bar
+            psnr_ = psnr(image_tensor, gt_image_tensor).mean().double()
+
+            # Update progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             ema_psnr_for_log = 0.4 * psnr_ + 0.6 * ema_psnr_for_log
             total_point = gaussians._xyz.shape[0]
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}",
-                                          "psnr": f"{psnr_:.{2}f}",
+                progress_bar.set_postfix({"loss": f"{ema_loss_for_log:.{7}f}",
+                                          "psnr": f"{ema_psnr_for_log:.{2}f}",
                                           "point":f"{total_point}"})
                 progress_bar.update(10)
             if iteration == opt.iterations:
@@ -244,6 +241,14 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
 
+                elapsed_time = time()
+            
+                total_time_seconds = elapsed_time - start_time
+                hours, remainder = divmod(total_time_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                with open(os.path.join(args.model_path, 'training_time.txt'), 'a') as file:
+                    file.write(f'Iteration {iteration}: {total_time_seconds} seconds ... {int(hours)}h {int(minutes)}m {seconds}sec  points: {gaussians._xyz.shape[0]}\n')
+
             if iteration in testing_iterations:
                 testing_psnr = []
 
@@ -256,6 +261,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     testing_psnr.append(psnr(test_render, test_cam.original_image.cuda()).cpu())
 
                 test_list_log.append(np.array(testing_psnr).mean())
+                
+            if iteration in checkpoint_iterations:
+                print("\n[ITER {}] Saving Checkpoint".format(iteration))
+                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
             # Does not work
             if dataset.render_process:
@@ -267,6 +276,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     render_training_image(scene, gaussians, test_cams, render, pipe, background, 0, iteration-1, timer.get_elapsed_time())
 
             timer.start()
+
             # Densification
             if iteration < opt.densify_until_iter :
                 # Keep track of max radii in image-space for pruning
@@ -292,10 +302,6 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
-
-            if (iteration in checkpoint_iterations):
-                print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
     fig, ax = plt.subplots(3, 1, figsize=(30, 25))
 

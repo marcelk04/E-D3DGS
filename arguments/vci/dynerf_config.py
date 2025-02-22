@@ -18,7 +18,7 @@ ModelHiddenParams = dict(
 OptimizationParams = dict(
     dataloader = True,
     batch_size = 1,
-    iterations = 80_000,
+    iterations = 40_000,
     maxtime = 325,
 
     densify_from_iter = 5000,    
@@ -30,12 +30,12 @@ OptimizationParams = dict(
     opacity_threshold_fine_init = 0.0001,
     opacity_threshold_fine_after = 0.0001,
     
-    densify_until_iter = 80_000,
-    position_lr_max_steps = 80_000,
-    deformation_lr_max_steps = 80_000,
+    densify_until_iter = 40_000,
+    position_lr_max_steps = 40_000,
+    deformation_lr_max_steps = 40_000,
 
-    lambda_dssim = 1,
-    num_multiview_ssim = 5,
+    lambda_dssim = 0,
+    num_multiview_ssim = 0,
     use_colmap = True,
-    reg_coef = 1.,
+    reg_coef = 0,
 )
