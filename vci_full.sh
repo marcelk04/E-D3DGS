@@ -1,4 +1,4 @@
-export CUDA_VISIBLE_DEVICES=6
+export CUDA_VISIBLE_DEVICES=5
 
 GT_PATH="/data/student_kaempchen/ed3dgs-data/vci"
 SAVE_PATH="output"

@@ -26,6 +26,15 @@ def l1_loss(network_output, gt, keepdim=False):
         return torch.abs((network_output - gt)).mean(dim=tuple(range(1, network_output.dim())))
     else:
         return torch.abs((network_output - gt)).mean()
+    
+def l1_loss_masked(network_output, gt, mask, fgr_weight, keepdim=False):
+    diff = torch.abs(network_output - gt)
+    diff = diff * mask * fgr_weight + diff * (1 - mask)
+
+    if keepdim:
+        return diff.mean(dim=tuple(range(1, network_output.dim())))
+    else:
+        return diff.mean()
 
 def l2_loss(network_output, gt):
     return ((network_output - gt) ** 2).mean()

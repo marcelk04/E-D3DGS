@@ -24,7 +24,7 @@ from tqdm import tqdm
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams, ModelHiddenParams
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss
+from utils.loss_utils import l1_loss, ssim, l2_loss, lpips_loss, l1_loss_masked
 from utils.image_utils import psnr
 from utils.extra_utils import o3d_knn, weighted_l2_loss_v2, image_sampler, calculate_distances, sample_camera
 from utils.timer import Timer
@@ -138,6 +138,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
         images = []
         gt_images = []
+        gt_masks = []
         radii_list = []
         visibility_filter_list = []
         viewspace_point_tensor_list = []
@@ -160,20 +161,28 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
             images.append(image.unsqueeze(0))
             gt_image = viewpoint_cam.original_image.cuda()
-            gt_images.append(gt_image.unsqueeze(0))
+            gt_images.append(gt_image.unsqueeze(0)) # shape: 1 x 3 x h x w
+            if type(viewpoint_cam.gt_alpha_mask) != type(None):
+                gt_mask = viewpoint_cam.gt_alpha_mask.cuda()
+                gt_masks.append(gt_mask.unsqueeze(0).unsqueeze(0)) # shape: 1 x 1 x h x w
             radii_list.append(radii.unsqueeze(0))
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
 
             viewpoint_cam.original_image = None
         
-        image_tensor = torch.cat(images,0)
-        gt_image_tensor = torch.cat(gt_images,0)
-        radii = torch.cat(radii_list,0).max(dim=0).values
+        image_tensor = torch.cat(images, 0)
+        gt_image_tensor = torch.cat(gt_images, 0)
+        gt_mask_tensor = None
+        if len(gt_masks) > 0:
+            gt_mask_tensor = torch.cat(gt_masks, 0)
+        radii = torch.cat(radii_list, 0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
 
-        
-        Ll1 = l1_loss(image_tensor, gt_image_tensor, keepdim=True)
+        if type(gt_mask_tensor) == type(None):
+            Ll1 = l1_loss(image_tensor, gt_image_tensor, keepdim=True)
+        else:
+            Ll1 = l1_loss_masked(image_tensor, gt_image_tensor, gt_mask_tensor, 2.0, keepdim=True)
         Ll1_items = Ll1.detach()
         Ll1 = Ll1.mean()
         if opt.lambda_dssim > 0. and type(sampled_frame_no) != type(None) or (method == "by_error" and (iteration % 10 == 0) and opt.num_multiview_ssim==0):

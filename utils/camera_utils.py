@@ -97,7 +97,7 @@ def loadCamv2(args, id, cam_info, resolution_scale):
         if resized_image_rgb.shape[0] == 4: # 4 channels
             loaded_mask = resized_image_rgb[3, ...]
 
-    cameradirect = cam_info.hpdirecitons
+    cameradirect = cam_info.hpdirections
     camerapose = cam_info.pose 
 
     try:

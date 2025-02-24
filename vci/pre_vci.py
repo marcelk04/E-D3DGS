@@ -6,6 +6,7 @@ import json
 from PIL import Image
 from tqdm import tqdm
 import torch
+from torchvision.transforms.functional import to_tensor, to_pil_image
 
 import numpy as np
 from skimage import transform
@@ -68,6 +69,24 @@ def load_paths(args: argparse.Namespace) -> dict[str, str]:
 def cam_name(idx: int) -> str:
 	return "cam" + str(idx).zfill(2)
 
+def rotate_image(image, rotation):
+	if rotation == 1:
+		return image.transpose(Image.ROTATE_90)
+	elif rotation == 2:
+		return image.transpose(Image.ROTATE_180)
+	elif rotation == 3:
+		return image.transpose(Image.ROTATE_270)
+	else:
+		return image
+
+def mask_image(img_src, bg_src, model):
+	mask, img = model(img_src, bg_src)[:2]
+	img = img * mask
+
+	masked = torch.concatenate((img[0], mask[0]))
+
+	return to_pil_image(masked.cpu())
+
 def prepare_input_images_ed3dgs(paths: dict[str, str], args: argparse.Namespace) -> tuple[int, int]:
 	"""
 	"""
@@ -84,7 +103,9 @@ def prepare_input_images_ed3dgs(paths: dict[str, str], args: argparse.Namespace)
 	print()
 
 	# Read background images
-	bgs = ski.io.imread_collection(os.path.join(paths['bg_src'], "*"), conserve_memory=False)
+	#bgs = ski.io.imread_collection(os.path.join(paths['bg_src'], "*"), conserve_memory=False)
+	bg_paths = [os.path.join(paths['bg_src'], bg) for bg in sorted(os.listdir(paths['bg_src']))]
+	bgs = [to_tensor(Image.open(path)).cuda().unsqueeze(0) for path in bg_paths]
 
 	# Create image dir
 	if not create_dir(os.path.join(paths['base'], "images")):
@@ -128,17 +149,25 @@ def prepare_input_images_ed3dgs(paths: dict[str, str], args: argparse.Namespace)
 		for j, cam in enumerate(cameras):
 			progress_bar.set_postfix({ "Cam": os.path.splitext(cam)[0], "Img": i })
 
-			# Load input image
-			frame_img = ski.io.imread(os.path.join(frame_path, cam)) / 255.0
+			frame_img = to_tensor(Image.open(os.path.join(frame_path, cam))).cuda().unsqueeze(0)
+			masked = mask_image(frame_img, bgs[j], model)
+			masked = rotate_image(masked, rotations[j])
 
-			# Calculate mask and store it in alpha channel
-			masked, mask = calculate_mask(frame_img, bgs[j] / 255.0, model)
+			dst_path = os.path.join(paths['base'], "images", cam_name(j), str(i).zfill(4) + ".png")
+			masked.save(dst_path)
 
-			masked = np.rot90(masked, k=rotations[j], axes=(0,1))
+			# # Load input image
+			# frame_img = ski.io.imread(os.path.join(frame_path, cam)) / 255.0
 
-			# Save as png to keep alpha channel
-			dst_path = os.path.join(paths['base'], "images", cam_name(j), str(i).zfill(4) + ".jpg")
-			ski.io.imsave(dst_path, np.uint8(masked * 255.0), check_contrast=False)
+			# # Calculate mask and store it in alpha channel
+			# masked, mask = calculate_mask(frame_img, bgs[j] / 255.0, model)
+			# masked = np.concatenate((masked, mask[..., None]), axis=-1)
+
+			# masked = np.rot90(masked, k=rotations[j], axes=(0,1))
+
+			# # Save as png to keep alpha channel
+			# dst_path = os.path.join(paths['base'], "images", cam_name(j), str(i).zfill(4) + ".png")
+			# ski.io.imsave(dst_path, np.uint8(masked * 255.0), check_contrast=False)
 
 			progress_bar.update()
 

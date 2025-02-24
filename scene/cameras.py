@@ -120,13 +120,17 @@ class Camera(nn.Module):
             self.rayd = None
             
     def load_image(self):
-        original_image = Image.open(self.image_path)
-        original_image = original_image.resize(self.img_wh, Image.LANCZOS)
-        self.original_image = self.transform(original_image)
+        original_image = Image.open(self.image_path).resize(self.img_wh, Image.LANCZOS)
+        image_tensor = self.transform(original_image)
+
+        self.original_image = image_tensor[:3, ...]
         self.image_width = self.original_image.shape[2]
         self.image_height = self.original_image.shape[1]
-        if self.gt_alpha_mask is not None:
-            self.original_image *= self.gt_alpha_mask.to(self.data_device)
+
+        if image_tensor.shape[0] == 4:
+            self.gt_alpha_mask = image_tensor[3, ...]
+        # if self.gt_alpha_mask is not None:
+        #     self.original_image *= self.gt_alpha_mask.to(self.data_device)
 
     def unload_image(self):
         self.original_image = None

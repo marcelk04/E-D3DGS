@@ -47,7 +47,7 @@ class CameraInfo(NamedTuple):
     far: float
     timestamp: float
     pose: np.array 
-    hpdirecitons: np.array
+    hpdirections: np.array
     cxr: float
     cyr: float
 
@@ -58,7 +58,7 @@ class SceneInfo(NamedTuple):
     video_cameras: list
     nerf_normalization: dict
     ply_path: str
-    
+
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
@@ -120,10 +120,10 @@ def readColmapCamerasDynerf(cam_extrinsics, cam_intrinsics, images_folder, near,
             if j == startime:
                 image = Image.open(image_path)
                 image = image.resize((int(width), int(height)), Image.LANCZOS)
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=1, hpdirecitons=1,cxr=0.0, cyr=0.0)
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=1, hpdirections=1,cxr=0.0, cyr=0.0)
             else:
                 image = None
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=None, hpdirecitons=None, cxr=0.0, cyr=0.0)
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=None, hpdirections=None, cxr=0.0, cyr=0.0)
             cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -172,9 +172,9 @@ def readColmapCamerasTechnicolorTestonly(cam_extrinsics, cam_intrinsics, images_
                 image = None 
 
             if j == startime:
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=1, hpdirecitons=1, cxr=cxr, cyr=cyr)
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=1, hpdirections=1, cxr=cxr, cyr=cyr)
             else:
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=None, hpdirecitons=None,  cxr=cxr, cyr=cyr)
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=None, hpdirections=None,  cxr=cxr, cyr=cyr)
             cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -218,9 +218,9 @@ def readColmapCamerasTechnicolor(cam_extrinsics, cam_intrinsics, images_folder, 
             image = Image.open(image_path)
 
             if j == startime:
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=1, hpdirecitons=1, cxr=cxr, cyr=cyr)
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=1, hpdirections=1, cxr=cxr, cyr=cyr)
             else:
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=None, hpdirecitons=None,  cxr=cxr, cyr=cyr)
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-startime)/duration, pose=None, hpdirections=None,  cxr=cxr, cyr=cyr)
             cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -260,12 +260,16 @@ def readColmapCamerasVCI(cam_extrinsics, cam_intrinsics, src_path, near, far, st
             if j == starttime:
                 image = Image.open(image_path)
                 image = image.resize((int(width), int(height)), Image.LANCZOS)
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-starttime)/duration, pose=1, hpdirecitons=1, cxr=0.0, cyr=0.0)
+                pose = 1
+                hpdirections = 1
             else:
                 image = None
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-starttime)/duration, pose=None, hpdirecitons=None, cxr=0.0, cyr=0.0)
+                pose = None
+                hpdirections = None
+
+            cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-starttime)/duration, pose=pose, hpdirections=hpdirections, cxr=0.0, cyr=0.0)
             cam_infos.append(cam_info)
-            
+
     return cam_infos
 
 
@@ -574,6 +578,6 @@ def getSpiralColmap(cam_extrinsics, cam_intrinsics, near, far):
         R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
         T = w2c[:3, 3]
         image = None
-        cam_info = CameraInfo(uid=i, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=None, image_name=None, width=width, height=height, near=near, far=far, timestamp=i/(len(render_poses) - 1), pose=None, hpdirecitons=None, cxr=0.0, cyr=0.0)
+        cam_info = CameraInfo(uid=i, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=None, image_name=None, width=width, height=height, near=near, far=far, timestamp=i/(len(render_poses) - 1), pose=None, hpdirections=None, cxr=0.0, cyr=0.0)
         cam_infos.append(cam_info)
     return cam_infos

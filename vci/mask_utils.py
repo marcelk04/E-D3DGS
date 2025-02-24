@@ -8,11 +8,6 @@ def to_numpy(torch_arr):
 	return np.asarray(torch_arr.cpu())
 
 def calculate_mask(img_src, bg_src, model):
-	# Crop images to be a multiple of 4
-	h, w, _ = img_src.shape
-	img_src = img_src[:h, :w, :]
-	bg_src = bg_src[:h, :w, :]
-
 	# Change image layout (h x w x 3 -> 3 x h x w)
 	img_src = np.transpose(img_src, axes=(2, 0, 1))
 	bg_src = np.transpose(bg_src, axes=(2, 0, 1))
