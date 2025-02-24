@@ -29,6 +29,8 @@ import natsort
 import torch
 from tqdm import tqdm
 
+from utils.pose_utils import normalize, viewmatrix
+
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -223,9 +225,9 @@ def readColmapCamerasTechnicolor(cam_extrinsics, cam_intrinsics, images_folder, 
     sys.stdout.write('\n')
     return cam_infos
 
-def readColmapCamerasVCI(cam_extrinsics, cam_intrinsics, images_folder, near, far, starttime, duration):
+def readColmapCamerasVCI(cam_extrinsics, cam_intrinsics, src_path, near, far, starttime, duration):
     cam_infos = []
-    for idx, key in tqdm(enumerate(cam_extrinsics), desc="Loading training cameras", total=len(cam_extrinsics)):
+    for idx, key in tqdm(enumerate(cam_extrinsics), desc="Reading training cameras", total=len(cam_extrinsics)):
         extr = cam_extrinsics[key]
         intr = cam_intrinsics[extr.camera_id]
         height = intr.height
@@ -237,36 +239,34 @@ def readColmapCamerasVCI(cam_extrinsics, cam_intrinsics, images_folder, near, fa
 
         if intr.model=="SIMPLE_PINHOLE":
             focal_length_x = intr.params[0]
-            FovY = focal2fov(focal_length_x, height)
             FovX = focal2fov(focal_length_x, width)
+            FovY = focal2fov(focal_length_x, height)
         else:
             focal_length_x = intr.params[0]
             focal_length_y = intr.params[1] 
-            FovY = focal2fov(focal_length_y, height)
             FovX = focal2fov(focal_length_x, width)
-        # else:
-        #     assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
+            FovY = focal2fov(focal_length_y, height)
+
+        cam_name = os.path.splitext(extr.name)[0] # cam00, cam01, ...
+        images_dir = os.path.join(src_path, "images")
+        frames = sorted(os.listdir(os.path.join(images_dir, cam_name)))
 
         for j in range(starttime, starttime+int(duration)):
-            image_name = os.path.join(os.path.splitext(extr.name)[0], str(j).zfill(4) + ".jpg")
-            image_path = os.path.join(images_folder, "images", image_name)
+            image_name = os.path.join(cam_name, [frame for frame in frames if frame.startswith(str(j).zfill(4))][0])
+            image_path = os.path.join(images_dir, image_name)
 
-            assert os.path.exists(image_path), "Image {} does not exist!".format(image_path)
+            assert os.path.exists(image_path), f"Image {image_path} does not exist!"
+
             if j == starttime:
                 image = Image.open(image_path)
                 image = image.resize((int(width), int(height)), Image.LANCZOS)
-                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-starttime)/duration, pose=1, hpdirecitons=1,cxr=0.0, cyr=0.0)
+                cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-starttime)/duration, pose=1, hpdirecitons=1, cxr=0.0, cyr=0.0)
             else:
                 image = None
                 cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path, image_name=image_name, width=width, height=height, near=near, far=far, timestamp=(j-starttime)/duration, pose=None, hpdirecitons=None, cxr=0.0, cyr=0.0)
             cam_infos.append(cam_info)
             
     return cam_infos
-
-
-
-def normalize(v):
-    return v / np.linalg.norm(v)
 
 
 def fetchPly(path):
@@ -310,7 +310,7 @@ def readColmapSceneInfoVCI(path, duration, testonly=None):
     near = 0.01
     far = 100
 
-    cam_infos_unsorted = readColmapCamerasVCI(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=path, near=near, far=far, starttime=0, duration=duration)    
+    cam_infos_unsorted = readColmapCamerasVCI(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, src_path=path, near=near, far=far, starttime=0, duration=duration)    
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
     video_cam_infos = getSpiralColmap(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,near=near, far=far)
 
@@ -501,20 +501,6 @@ sceneLoadTypeCallbacks = {
     "VCI": readColmapSceneInfoVCI
 }
 
-# modify the code in https://github.com/hustvl/4DGaussians/blob/master/scene/neural_3D_dataset_NDC.py
-def normalize(v):
-    """Normalize a vector."""
-    return v / np.linalg.norm(v)
-
-def viewmatrix(z, up, pos):
-    vec2 = normalize(z)
-    vec1_avg = up
-    vec0 = normalize(np.cross(vec1_avg, vec2))
-    vec1 = normalize(np.cross(vec2, vec0))
-    m = np.eye(4)
-    m[:3] = np.stack([vec0, vec1, vec2, pos], 1)
-    return m
-
 def render_path_spiral(c2w, up, rads, zrate, N_rots=2, N=120):
     render_poses = []
 
@@ -553,7 +539,7 @@ def get_spiral(c2ws_all, near, far, rads_scale=0.25, N_views=120):
 
 def getSpiralColmap(cam_extrinsics, cam_intrinsics, near, far):
     c2ws_all = {}
-    for idx, key in tqdm(enumerate(cam_extrinsics), desc="Loading video cameras", total=len(cam_extrinsics)):
+    for idx, key in tqdm(enumerate(cam_extrinsics), desc="Reading video cameras", total=len(cam_extrinsics)):
         extr = cam_extrinsics[key]
         intr = cam_intrinsics[extr.camera_id]
         height = intr.height

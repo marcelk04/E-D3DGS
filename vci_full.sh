@@ -5,7 +5,7 @@ SAVE_PATH="output"
 
 DATASET="vci"
 SCENE="2024_12_12_dynamic3"
-NAME="02_22_04"
+NAME="test"
 
 CONFIG="default"
 

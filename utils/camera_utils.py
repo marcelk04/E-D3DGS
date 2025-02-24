@@ -87,24 +87,19 @@ def loadCamv2(args, id, cam_info, resolution_scale):
         scale = float(global_down) * float(resolution_scale)
         resolution = (int(orig_w / scale), int(orig_h / scale))
 
-    # print(orig_w, orig_h)
-    # # print(scale)
-    # print(resolution, args.resolution, resolution_scale)
-    # exit()
+    resized_image_rgb = None
+    gt_image = None
+    loaded_mask = None
 
     if cam_info.image:
         resized_image_rgb = PILtoTorch(cam_info.image, resolution)
         gt_image = resized_image_rgb[:3, ...]
-        loaded_mask = None
-        if resized_image_rgb.shape[1] == 4:
-            loaded_mask = resized_image_rgb[3:4, ...]
-    else:
-        resized_image_rgb = None
-        gt_image = None
-        loaded_mask = None
+        if resized_image_rgb.shape[0] == 4: # 4 channels
+            loaded_mask = resized_image_rgb[3, ...]
 
     cameradirect = cam_info.hpdirecitons
     camerapose = cam_info.pose 
+
     try:
         cam_no = int(os.path.dirname(cam_info.image_path).split('/')[-1][3:])
         frame_no = int(cam_info.image_name.split('/')[-1][:-4])

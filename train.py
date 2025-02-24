@@ -17,7 +17,8 @@ import torch
 from random import randint
 from gaussian_renderer import render, network_gui
 import sys
-from scene import Scene, GaussianModel
+from scene import Scene
+from scene.gaussian_model import GaussianModel
 import uuid
 from tqdm import tqdm
 from argparse import ArgumentParser, Namespace

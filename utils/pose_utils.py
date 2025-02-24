@@ -86,3 +86,16 @@ def smooth_camera_poses(cameras, num_interpolations=5):
     smoothed_cameras.append(cameras[-1])
     smoothed_times.append(1.0)
     return smoothed_cameras, smoothed_times
+
+def normalize(v):
+    """Normalize a vector."""
+    return v / np.linalg.norm(v)
+
+def viewmatrix(z, up, pos):
+    vec2 = normalize(z)
+    vec1_avg = up
+    vec0 = normalize(np.cross(vec1_avg, vec2))
+    vec1 = normalize(np.cross(vec2, vec0))
+    m = np.eye(4)
+    m[:3] = np.stack([vec0, vec1, vec2, pos], 1)
+    return m

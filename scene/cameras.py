@@ -42,7 +42,7 @@ class Camera(nn.Module):
         self.gt_alpha_mask = gt_alpha_mask
         self.img_wh = img_wh
         self.image_path = image_path
-        
+
         try:
             self.data_device = torch.device(data_device)
         except Exception as e:
@@ -72,15 +72,13 @@ class Camera(nn.Module):
             self.image_width = None
             self.image_height = None
             self.original_image = None
-        
-
 
         self.zfar = 100.0
         self.znear = 0.01  
 
         self.trans = trans
         self.scale = scale
-        
+
         self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
         if cyr != 0.0 :
             self.cxr = cxr
@@ -96,11 +94,10 @@ class Camera(nn.Module):
             camera2wold = self.world_view_transform.T.inverse()
             pixgrid = create_meshgrid(self.image_height, self.image_width, normalized_coordinates=False, device="cpu")[0]
             pixgrid = pixgrid.cuda()  # H,W,
-            
+
             xindx = pixgrid[:,:,0] # x 
             yindx = pixgrid[:,:,1] # y
-      
-            
+
             ndcy, ndcx = pix2ndc(yindx, self.image_height), pix2ndc(xindx, self.image_width)
             ndcx = ndcx.unsqueeze(-1)
             ndcy = ndcy.unsqueeze(-1)# * (-1.0)
@@ -117,7 +114,6 @@ class Camera(nn.Module):
             
             self.rayo = self.camera_center.expand(rays_d.shape).permute(2, 0, 1).unsqueeze(0)                                     #rayo.permute(2, 0, 1).unsqueeze(0)
             self.rayd = rays_d.permute(2, 0, 1).unsqueeze(0)    
-            
 
         else :
             self.rayo = None
@@ -131,6 +127,10 @@ class Camera(nn.Module):
         self.image_height = self.original_image.shape[1]
         if self.gt_alpha_mask is not None:
             self.original_image *= self.gt_alpha_mask.to(self.data_device)
+
+    def unload_image(self):
+        self.original_image = None
+        self.gt_alpha_mask = None
     
     def set_image(self):
         self.image_width = self.img_wh[0]
