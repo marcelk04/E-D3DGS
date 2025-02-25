@@ -169,7 +169,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
 
-            viewpoint_cam.original_image = None
+            viewpoint_cam.unload_image()
         
         image_tensor = torch.cat(images, 0)
         gt_image_tensor = torch.cat(gt_images, 0)
@@ -182,7 +182,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         if type(gt_mask_tensor) == type(None):
             Ll1 = l1_loss(image_tensor, gt_image_tensor, keepdim=True)
         else:
-            Ll1 = l1_loss_masked(image_tensor, gt_image_tensor, gt_mask_tensor, 2.0, keepdim=True)
+            Ll1 = l1_loss_masked(image_tensor, gt_image_tensor, gt_mask_tensor, fgr_weight=2.0, keepdim=True)
         Ll1_items = Ll1.detach()
         Ll1 = Ll1.mean()
         if opt.lambda_dssim > 0. and type(sampled_frame_no) != type(None) or (method == "by_error" and (iteration % 10 == 0) and opt.num_multiview_ssim==0):

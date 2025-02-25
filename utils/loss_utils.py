@@ -10,17 +10,17 @@
 #
 
 import torch
-import torch.nn.functional as F
+from torch.nn import functional as F
 from torch.autograd import Variable
+from torchvision import transforms
 from math import exp
 import lpips
 import numpy as np 
 
-import torchvision.transforms as transforms
-
 def lpips_loss(img1, img2, lpips_model):
     loss = lpips_model(img1,img2)
     return loss.mean()
+
 def l1_loss(network_output, gt, keepdim=False):
     if keepdim:
         return torch.abs((network_output - gt)).mean(dim=tuple(range(1, network_output.dim())))

@@ -1,11 +1,11 @@
-export CUDA_VISIBLE_DEVICES=5
+export CUDA_VISIBLE_DEVICES=6
 
 GT_PATH="/data/student_kaempchen/ed3dgs-data/vci"
 SAVE_PATH="output"
 
 DATASET="vci"
 SCENE="2024_12_12_dynamic3"
-NAME="test"
+NAME="02_25_01"
 
 CONFIG="default"
 
