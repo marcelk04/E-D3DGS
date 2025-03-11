@@ -23,28 +23,26 @@ ModelHiddenParams = dict(
 	no_coarse_deform = False,
 	no_fine_deform = False,
 	
-	total_num_frames = 325,
 	c2f_temporal_iter = 10000,
-	deform_from_iter = 0,
-	use_anneal = False,
-	zero_temporal = True,
+	deform_from_iter = 5000,
+	use_anneal = True,
+	zero_temporal = False,
 )
 
 OptimizationParams = dict(
 	dataloader = True,
-	iterations = 40_000,
-	maxtime = 325,
-	batch_size = 1,
+	iterations = 60_000,
+	batch_size = 2,
 	
 	position_lr_init = 0.00004,
 	position_lr_final = 0.0000004,
 	position_lr_delay_mult = 0.01,
-	position_lr_max_steps = 40_000,
+	position_lr_max_steps = 60_000,
 
 	deformation_lr_init = 0.000016,
 	deformation_lr_final = 0.0000016,
 	deformation_lr_delay_mult = 0.01,
-	deformation_lr_max_steps = 40_000,
+	deformation_lr_max_steps = 60_000,
 	
 	feature_lr = 0.0025,
 	feature_lr_div_factor = 20.0,
@@ -61,16 +59,17 @@ OptimizationParams = dict(
 	weight_decay_iteration = 5000,
 
 	densification_interval = 100,
-	densify_from_iter = 5000,
+	densify_from_iter = 3000,
 	densify_until_iter = 60_000,
 	densify_grad_threshold_fine_init = 0.0003,
 	densify_grad_threshold_after = 0.0003,
-	pruning_from_iter = 20000,
-	pruning_interval = 1000,
 
-	opacity_reset_interval = 6000000,
+	pruning_interval = 1000,
+	pruning_from_iter = 20000,
 	opacity_threshold_fine_init = 0.005,
 	opacity_threshold_fine_after = 0.005,
+
+	opacity_reset_interval = 6000000,
 	reset_opacity_ratio = 0,
 	opacity_l1_coef_fine = 0,
 	
@@ -82,9 +81,10 @@ OptimizationParams = dict(
 	
 	use_dense_colmap = False,
 	use_colmap = True,
-	coef_tv_temporal_embedding = 0.001,
+	coef_tv_temporal_embedding = 0.0001,
 	random_until = 60000,
 	num_multiview_ssim = 5,
 	offsets_lr = 0.00002,
-	reg_coef = 0.01,
+	reg_coef = 0.2,
+	foreground_weight = 1.0,
 )

@@ -18,10 +18,10 @@ import sys
 path_root = Path(__file__).parents[1]
 sys.path.append(str(path_root))
 
-#from script.thirdparty.colmap_database_3_9 import *
+# from script.thirdparty.colmap_database_3_9 import *
 from script.thirdparty.colmap_database_3_10 import *
 from script.downsample_point import process_ply_file
-from utils.pose_utils import rotmat2qvec
+from utils.pose_utils import rotmat2qvec, qvec2rotmat
 from vci.pose_utils import *
 from vci.sys_utils import *
 from vci.mask_utils import *
@@ -151,7 +151,9 @@ def prepare_input_images_ed3dgs(paths: dict[str, str], args: argparse.Namespace)
 
 			frame_img = to_tensor(Image.open(os.path.join(frame_path, cam))).cuda().unsqueeze(0)
 			masked = mask_image(frame_img, bgs[j], model)
-			masked = rotate_image(masked, rotations[j])
+
+			if args.rotate_images:
+				masked = rotate_image(masked, rotations[j])
 
 			dst_path = os.path.join(paths['base'], "images", cam_name(j), str(i).zfill(4) + ".png")
 			masked.save(dst_path)
@@ -220,11 +222,15 @@ def prepare_input_images_colmap(paths: dict[str, str], args: argparse.Namespace)
 
 	for i, img_name in tqdm(enumerate(images), "Preparing input images", total=len(images)):
 		img_src = ski.io.imread(os.path.join(img_path, img_name)) / 255.0
-		img_src = np.rot90(img_src, k=rotations[i], axes=(0,1))
+
+		if args.rotate_images:
+			img_src = np.rot90(img_src, k=rotations[i], axes=(0,1))
 
 		if args.remove_background:
 			bg_src = ski.io.imread(os.path.join(paths['bg_src'], img_name)) / 255.0
-			bg_src = np.rot90(bg_src, k=rotations[i], axes=(0,1))
+
+			if args.rotate_images:
+				bg_src = np.rot90(bg_src, k=rotations[i], axes=(0,1))
 
 			_, mask = calculate_mask(img_src.copy(), bg_src.copy(), model)
 			
@@ -294,12 +300,12 @@ def extract_poses(paths: dict[str, str], args: argparse.Namespace) -> None:
 		camera_name = camera["camera_id"]
 		matching_images = [f for f in filenames if camera_name in f]
 
-		if len(matching_images) == 0:
-			print(f"Missing image source for camera {camera_name}. Skipping this camera.")
-			continue
+		# if len(matching_images) == 0:
+		# 	print(f"Missing image source for camera {camera_name}. Skipping this camera.")
+		# 	continue
 
-		# image_name = "cam" + str(cam_idx).zfill(2) + ".jpg"
-		image_name = camera_name
+		image_name = "cam" + str(cam_idx).zfill(2) + ".jpg"
+		# image_name = camera_name
 
 		img = Image.open(os.path.join(paths['input'], image_name))
 		width, height = img.size
@@ -317,11 +323,6 @@ def extract_poses(paths: dict[str, str], args: argparse.Namespace) -> None:
 		R = view_matrix[:3, :3]
 		T = view_matrix[:3, 3]
 		Q = rotmat2qvec(R)
-
-		# Shift camera positions
-		#P = -R.T @ T
-		#P -= avg_P
-		#T = -R @ P
 
 		# focal length
 		f_x = camera_matrix[0, 0]
@@ -364,13 +365,13 @@ def extract_poses(paths: dict[str, str], args: argparse.Namespace) -> None:
 		elif args.camera == "RADIAL_FISHEYE":
 			params = np.array([f_x, c_x, c_y, distortion_coefficients[0], distortion_coefficients[1]])
 			# params = np.array([f_x, c_x, c_y, 0, 0])
-
 		camera_id = db.add_camera(camera_model, width, height, params)
 
-		#image_id = db.add_image(image_name, camera_id, Q, T, image_id=i+1) # For COLMAP <= 3.9
+		# image_id = db.add_image(image_name, camera_id, Q, T, image_id=i+1) # For COLMAP <= 3.9
 		image_id = db.add_image(image_name, camera_id, image_id=i+1) # For COLMAP >= 3.10
 
-		#db.add_pose_prior(image_id, P)
+		# P = np.dot(-R.T, T)
+		# db.add_pose_prior(image_id, P)
 
 		db.commit()
 
@@ -411,10 +412,14 @@ def main():
 	parser.add_argument("--gaussian_splatting", action="store_true", default=False, help="enable output for 3d gaussian splatting (default: %(default)s)")
 	parser.add_argument("--skip_dense", action="store_true", default=False, help="skip dense reconstruction (True when --gaussian_splatting is set, default: %(default)s)")
 	parser.add_argument("--remove_background", action="store_true", default=False, help="use BackgroundMattingV2 to remove the background (default: %(default)s)")
+	parser.add_argument("--rotate_images", action="store_true", default=False)
 	args = parser.parse_args()
 
 	if args.gaussian_splatting:
 		args.skip_dense = True
+
+	if args.use_mapper:
+		args.rotate_images = True
 
 	# Load all the paths from the passed arguments
 	paths = load_paths(args)

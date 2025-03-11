@@ -148,6 +148,7 @@ class OptimizationParams(ParamGroup):
         self.num_multiview_ssim = 0
         self.offsets_lr = 0.00002
         self.reg_coef = 1.0
+        self.foreground_weight = 1.0
         
         super().__init__(parser, "Optimization Parameters")
 

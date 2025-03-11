@@ -1,40 +1,5 @@
 import numpy as np
 
-def lh_to_rh(matrix):
-	if matrix.shape != (4, 4):
-		raise ValueError("The input matrix has to have shape (4, 4)")
-	
-	flip_x = np.identity(4)
-	flip_x[0, 0] = -1
-
-	matrix_inv = view_matrix_inv(matrix)
-
-	matrix_inv = matrix_inv @ flip_x
-
-	matrix = view_matrix_inv(matrix_inv)
-	
-	# Entlang der yz-Ebene flippen
-	# flip_x = np.eye(3)
-	# flip_x[0, 0] = -1
-
-	# R = matrix[:3, :3]
-	# T = matrix[:3, 3]
-
-	# R_inv, P = view_matrix_inv_RT(R, T)
-
-	# R_inv = flip_x @ R_inv
-	# P = flip_x @ P
-
-	# R, T = view_matrix_inv_RT(R_inv, P)
-
-	# #R = flip_x @ R
-	# #T = flip_x @ T
-
-	# matrix[:3, :3] = R
-	# matrix[:3, 3] = T
-
-	return matrix
-
 def rotate_z_view_matrix(matrix):
 	R = matrix[:3, :3]
 	T = matrix[:3, 3]

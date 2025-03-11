@@ -5,9 +5,9 @@ SAVE_PATH="output"
 
 DATASET="vci"
 SCENE="2024_12_12_dynamic3"
-NAME="02_25_01"
+NAME="03_09_01_batch_size"
 
-CONFIG="default"
+CONFIG="2024_12_12_dynamic3"
 
 python train.py -s $GT_PATH/$SCENE --model_path $SAVE_PATH/$DATASET/$NAME --expname $DATASET/$SCENE --configs arguments/$DATASET/$CONFIG.py -r 1
 

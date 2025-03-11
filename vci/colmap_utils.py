@@ -109,17 +109,14 @@ def sparse_reconstruction_poses(paths: dict[str, str], args: argparse.Namespace)
 
 	feature_extract = f"colmap feature_extractor \
 		--database_path {paths['db']} \
-		--image_path {paths['input']} \
-		--SiftExtraction.estimate_affine_shape=true \
-		--SiftExtraction.domain_size_pooling=true" # --SiftExtraction.estimate_affine_shape=true  --SiftExtraction.domain_size_pooling=true 
+		--image_path {paths['input']}" # --SiftExtraction.estimate_affine_shape=true  --SiftExtraction.domain_size_pooling=true 
 	# Pass masks to colmap so there are no points generated for the background
 	if args.remove_background:
 		feature_extract += f" --ImageReader.mask_path {paths['masks']}"
 	exec_cmd(feature_extract)
 
 	feature_matcher = f"colmap exhaustive_matcher \
-		--database_path {paths['db']} \
-		--SiftMatching.guided_matching=true" # --SiftMatching.guided_matching=true
+		--database_path {paths['db']}" # --SiftMatching.guided_matching=true
 	exec_cmd(feature_matcher)
 
 	tri_and_map = f"colmap point_triangulator \

@@ -179,10 +179,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         radii = torch.cat(radii_list, 0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
 
-        if type(gt_mask_tensor) == type(None):
+        if type(gt_mask_tensor) == type(None) or opt.foreground_weight == 1.0:
             Ll1 = l1_loss(image_tensor, gt_image_tensor, keepdim=True)
         else:
-            Ll1 = l1_loss_masked(image_tensor, gt_image_tensor, gt_mask_tensor, fgr_weight=2.0, keepdim=True)
+            Ll1 = l1_loss_masked(image_tensor, gt_image_tensor, gt_mask_tensor, fgr_weight=opt.foreground_weight, keepdim=True)
         Ll1_items = Ll1.detach()
         Ll1 = Ll1.mean()
         if opt.lambda_dssim > 0. and type(sampled_frame_no) != type(None) or (method == "by_error" and (iteration % 10 == 0) and opt.num_multiview_ssim==0):

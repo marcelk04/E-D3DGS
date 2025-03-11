@@ -69,7 +69,7 @@ def main():
 	args = parser.parse_args()
 
 	poses = read_poses(args.input)
-	poses = normalize_poses(poses)
+	# poses = normalize_poses(poses)
 	save_poses(poses, args.output)
 
 	print("Done.")
