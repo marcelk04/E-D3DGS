@@ -1,3 +1,98 @@
+# Reconstructing Dynamic Scenes using Embedding-Based Deformable 3D Gaussian Splatting
+
+This repository is a fork of [E-D3DGS](https://github.com/JeongminB/E-D3DGS), I just modified the code to be able to reconstruct our own scenes.
+
+## Setup and Installation of Dependencies
+
+Clone the repository using:
+
+```bash
+git clone --recurse-submodules https://github.com/marcelk04/E-D3DGS.git 
+cd E-D3DGS
+```
+
+To install the environment for training, follow:
+
+```bash
+conda create -n ed3dgs python=3.9 
+conda activate ed3dgs
+
+pip install -r requirements.txt
+pip install -e submodules/diff-gaussian-rasterization/
+pip install -e submodules/simple-knn/ 
+
+conda deactivate
+```
+
+For preprocessing using COLMAP, you will need to create a separate environment using:
+
+```bash
+conda env create -f colmapenv.yml
+```
+
+## Preprocessing
+
+I tested my scripts with the scene "2024_12_12_dynamic3", but they should work for other scenes too.
+
+To prepare the input images and create a point cloud, use:
+
+```bash
+cd vci
+python pre_vci.py -s path/to/scene
+```
+
+<details>
+<summary><span style="font-weight: bold;">Command Line Arguments for pre_vci.py</span></summary>
+
+#### --source_path / -s
+Path to the dataset
+
+#### --calibration_file / -c
+Path to a calibration file containing the camera poses, ignored when COLMAP's mapper is used (default: calibration.json)
+
+#### --camera
+The camera type to be used by COLMAP (default and recommended: PINHOLE)
+
+#### --use_mapper
+Use the COLMAP mapper to estimate the camera poses
+
+#### --replace_images
+Delete previously prepared images and copy/process them again
+
+#### --gaussian_splatting
+Enable output for static 3D Gaussian Splatting
+
+#### --skip_dense
+Skip the dense reconstruction and only create a sparse reconstruction (True when --gaussian_splatting is set)
+
+#### --remove_background
+Use the given backgrounds to extract alpha masks and mask out the background
+
+#### --rotate_images
+Rotate the input images correctly (True when --use_mapper is set)
+
+</details>
+
+A sensible configuration for preprocessing can be executed by using:
+
+```bash
+cd vci
+bash pre_vci.sh
+```
+
+## Training
+
+The given training scripts can be used as described below. For easy use I also provided a bash script, which takes care of training, rendering, and optionally metrics:
+
+```bash
+bash train_vci.sh
+```
+
+To change the training parameters, modify arguments/vci/default.py or arguments/vci/2024_12_12_dynamic3.py.
+
+Below, I included the old README for completeness' sake.
+
+
 #  E-D3DGS : Embedding-Based Deformable 3D Gaussian Splatting (ECCV 2024)
 
 [![arXiv](https://img.shields.io/badge/arXiv-2404.03613-006600)](https://arxiv.org/abs/2404.03613) 

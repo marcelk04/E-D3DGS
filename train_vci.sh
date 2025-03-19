@@ -5,7 +5,7 @@ SAVE_PATH="output"
 
 DATASET="vci"
 SCENE="2024_12_12_dynamic3"
-NAME="03_09_01_batch_size"
+NAME="name"
 
 CONFIG="2024_12_12_dynamic3"
 

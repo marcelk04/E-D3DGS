@@ -14,3 +14,4 @@ kornia
 imageio
 imageio[ffmpeg]
 imageio[pyav]
+matplotlib
